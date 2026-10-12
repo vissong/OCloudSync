@@ -1,0 +1,107 @@
+{
+  "version": "0.3.1",
+  "swiftTests": 45,
+  "sessionAdapterCases": 25,
+  "bridgeTestGroups": 5,
+  "backgroundIdle": {
+    "startedAt": "2026-10-12T08:41:20.465330+00:00",
+    "initial": {
+      "responseCode": 200,
+      "failureCount": 0,
+      "successCount": 1,
+      "lastSuccess": 813487244.675894,
+      "state": "active",
+      "nextAttempt": 813487304.675894,
+      "backgroundRenewalEnabled": true
+    },
+    "windowClosed": true,
+    "targetMinutes": 10,
+    "endedAt": "2026-10-12T08:51:37.705596+00:00",
+    "elapsedSeconds": 617.24,
+    "final": {
+      "successCount": 9,
+      "failureCount": 0,
+      "state": "active",
+      "backgroundRenewalEnabled": true,
+      "responseCode": 200,
+      "lastSuccess": 813487839.78455,
+      "nextAttempt": 813487899.78455
+    },
+    "successfulBackgroundRenewals": 8,
+    "testedExecutableSHA256": "1f9e1b24225b4e5801e38dcd0ccefed1c7c5d3d2f91e8421c9b2bf4be7644666",
+    "recordsUnchanged": true,
+    "observedLastCheck": {
+      "complete": false,
+      "scanned": 100,
+      "total": 6396,
+      "seconds": 2.138436958368402,
+      "listRequests": 1,
+      "checkedAt": 813487254.267892
+    }
+  },
+  "recordsUnchanged": true,
+  "states": {
+    "baseline": 6395,
+    "imported": 1
+  },
+  "sampleDownload": {
+    "bytes": 8400984,
+    "matchesLedgerSHA256": true
+  },
+  "postRestartSession": {
+    "backgroundRenewalEnabled": true,
+    "state": "active",
+    "failureCount": 0,
+    "lastSuccess": 813489805.720763,
+    "responseCode": 200,
+    "nextAttempt": 813489865.720763,
+    "successCount": 3
+  },
+  "photosDuplicateRecheck": {
+    "duplicateInPhotos": true,
+    "bytes": 8400984,
+    "checkedAt": 813488346.886656,
+    "livePhotoPresent": true
+  },
+  "stoppedRenewal": {
+    "secondsWithoutNewStatus": 99.50089120864868,
+    "snapshot": {
+      "successCount": 3,
+      "failureCount": 0,
+      "lastSuccess": 813488359.130501,
+      "responseCode": 200,
+      "backgroundRenewalEnabled": false,
+      "state": "active"
+    }
+  },
+  "automaticSyncRestored": true,
+  "cancelledScanRegression": {
+    "cancelledRenewalRequests": 0,
+    "manualRenewalRequests": 1,
+    "passed": true
+  },
+  "finalExecutableSHA256": "2bc983efca10086f70627e65207543ed39672f530fd21a35c42698c040135bb9",
+  "finalRestartVerifiedAt": "2026-10-12T09:21:53.855161+00:00",
+  "scanIntervalMinutes": 60,
+  "independentReview": {
+    "round": 10,
+    "result": "无问题"
+  },
+  "finalScan": {
+    "checkedAt": 813489783.333297,
+    "complete": false,
+    "listRequests": 1,
+    "reason": "总数与首批一致",
+    "scanned": 100,
+    "seconds": 0.5409898333018646,
+    "total": 6396
+  },
+  "photosPermissionVerified": true,
+  "transientCountMismatch": {
+    "reportedTotal": 6395,
+    "listedUniqueVersions": 6396,
+    "ledgerPreserved": true,
+    "resolvedOnNextCheck": true
+  },
+  "finalVerifiedAt": "2026-10-12T09:23:31.987412+00:00"
+}

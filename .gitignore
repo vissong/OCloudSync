@@ -1,0 +1,13 @@
+.build/
+.swiftpm/
+dist/
+.DS_Store
+*.xcuserstate
+*.app/
+*.zip
+*.part
+.env
+.env.*
+ledger.json
+session-status.json
+last-check.json

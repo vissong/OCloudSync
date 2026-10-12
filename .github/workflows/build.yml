@@ -1,0 +1,47 @@
+name: Build macOS App
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test and package (Apple Silicon)
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Test, build and package
+        env:
+          OCLOUD_BUILD_DIR: ${{ runner.temp }}/ocloud-build
+          OCLOUD_OUTPUT_DIR: ${{ github.workspace }}/dist
+        run: bash scripts/ci.sh
+
+      - name: Upload App and checksum
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OCloudSync-macOS-arm64-${{ github.sha }}
+          path: |
+            dist/OCloudSync-macOS-arm64.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

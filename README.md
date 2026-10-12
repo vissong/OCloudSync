@@ -1,0 +1,95 @@
+# OPPO 照片同步（Mac 本地版）
+
+[![Build macOS App](https://github.com/vissong/OCloudSync/actions/workflows/build.yml/badge.svg)](https://github.com/vissong/OCloudSync/actions/workflows/build.yml)
+
+将 OPPO 云相册新增的静态原图与支持的 OPPO 实况照片下载到 Mac，经校验与查重后导入系统照片图库，由 macOS 的 iCloud 照片继续上传。**首次扫描只建立历史基线，不导入历史照片。**
+
+## 使用
+
+1. 打开交付目录中的 `OCloudSync.app`（macOS 13+，当前构建适用于 Apple Silicon）。
+2. 在「OPPO 登录」中完成官方登录及手机验证。App 使用自己的 WebView 会话；会话 Cookie 保存在本机 macOS 钥匙串，过期时需重新验证。程序不接管密码输入、不保存密码、不复制其他浏览器凭据。
+3. 点击「授权照片访问」，允许完整图库访问，用于原片查重及导入。
+4. 在 Mac「照片」设置中确认当前为系统照片图库且已开启 iCloud 照片。App 不更改这些设置。
+5. 点击「启用自动同步」。首次完整扫描成功后记录所有历史资产，此后默认每 15 分钟做轻量检查，出现变化再扫描新增或原文件版本。可改成 5 / 30 / 60 分钟。
+
+0.3.1 在自动同步开启时独立维护会话：原生调度约每 60–75 秒调用一次官方续期接口，与照片扫描间隔分开；成功后将最新 Cookie 保存到钥匙串。页面加载／执行中会等待，网络失败按 30 / 60 / 120 / 240 / 300 秒退避。请求有 40 秒等待上限，每次网页求值有 5 秒上限；网络请求本身沿用官方客户端 30 秒超时。停止自动同步后不再安排后台续期，已发出的官方请求可能正常完成；手动检查仍先验证会话。
+
+检测到官方登录页或明确的 403 失效响应时，界面与菜单栏显示「OPPO 登录已失效」，暂停云端任务，不消耗单张照片重试次数。重新登录后恢复会话检查，并在自动同步开启时继续检查新增照片。接口变化与网络错误使用不同状态；概览显示最近成功验证时间。续期不能绕过 OPPO 的强制登录、风控或最长会话期限；Mac 休眠／App 退出时不续期，唤醒后重新验证，必要时仍需本人登录。
+
+若续期执行超过上限而没有确定结果，先暂停该轮云端操作，按退避时间重载官方页面后重新验证，避免一直复用卡住的请求。重载前会取消尚未完成的下载，保留台账与正式缓存。
+
+关闭窗口后菜单栏仍继续运行；退出 App 或 Mac 休眠时不运行，唤醒后按计时器继续。未配置登录项，重新登录 macOS 后需要打开 App。自动同步开关会随 App 重启保留。
+
+「立即扫描」运行一次常规检查；「完整核对」立即遍历所有元数据；「重试失败任务」重置失败计数并再次处理。在「任务记录」输入唯一文件名，可单独检查原图下载和图库查重，**该检查不会导入照片或修改历史基线**。
+
+## 同步与去重规则
+
+- 不按拍摄日期判断新增：旧照片今天补传到 OPPO，只要其资产不在历史基线中，也会被识别。
+- 日常先读取总数与首批元数据（当前服务通常 100 项），与上次完整扫描的账号隔离检查点比较。总数和首批资产版本一致时，不再遍历后续页面；不会重新下载旧原图或给整个图库重新算哈希。
+- 首次升级、首次登录该账号、总数变化、首批资产版本变化、待处理任务、手动“完整核对”均完整读取列表；另外每 24 小时完整核对一次（App 需运行且联网，失败后继续重试）。轻量检查不推进完整核对时间。
+- **总数不变且首批以外的旧照片被替换／修改，可能要到每日完整核对才发现。** 可随时手动完整核对；普通新增令总数变化，会在下一轮检查触发全量核对，不以拍摄时间判断新增。
+- 按账号、资产 ID、原文件版本提交变化。未完整扫描时不提交基线；轻量检查绝不把没读取的照片当作删除。相册为空时无法可靠获取账号，等待出现文件后再建立基线。失败重试需确认远端源文件时仍使用完整扫描。
+- 概览显示最近检查的已读条数、列表批数和耗时；批数仅指同步器请求的清单批次，不包含官方网页的登录、统计、缩略图等额外请求。
+- 文件串行下载到 `.part`，核对字节数、可解码图像和像素，再计算 SHA-256；验证通过才进入正式缓存。
+- 同步台账中相同内容哈希关联到仍存在的图库资产时跳过导入。同名不同内容不会被当成重复。
+- 对 App 之外已有的图库内容，以原文件名筛选候选，再读取未修改原片计算哈希；包含隐藏和连拍资源。**未为整个已有图库建立跨文件名内容索引**，因此已有照片若被改名且从未被本程序记录，可能无法识别。
+- PhotoKit 导入前保存本地资产标识 journal，重启先核对已提交的事务和已有缓存；不盲目重放导入。
+- 文件失败按 30 / 60 / 120 / 240 / 480 秒退避，最多 6 次尝试；实际执行受 15 秒调度、当前任务和休眠影响。达到上限后需手动重试。列表失败按扫描间隔重试；会话错误由独立的续期退避与重新登录流程处理。
+- 云端原文件已删除或版本变化且本机没有可用缓存时，旧任务标记「源文件已移除或更新」，避免持续重扫；有可用缓存或导入 journal 的任务先恢复。
+
+## 范围与状态
+
+0.3.0 支持普通 JPEG、HEIC/HEIF、PNG，以及 **JPEG 内嵌 `mp42` 视频的 OPPO 实况照片**。实况会转换为一组 HEIC + MOV，通过同一标识和封面时间配对，经 Apple Live Photo 校验后作为一张实况照片导入。音轨、图像尺寸、方向、拍摄日期和 GPS 位置字段会校验保留；ImageIO 不保留 GPS 定位方式标签，厂商私有元数据也不保证保留。
+
+转换使用 HEIC 和 H.264 重编码，**不是字节级无损转换**；原始复合 JPEG 始终保留。优先读取 XMP 中的封面时间，无有效时间标注（缺失或 -1）时取视频中点，并在转换清单记录回退；无效、冲突或越界的时间会报错。单文件上限 200 MB，视频不超过 60 秒、轨道宽高不超过 8192。其他实况容器、独立视频、RAW 暂不支持，不会在转换失败时静默导入静态图。
+
+升级时，仅将此前已发现、处于「暂不支持」的新增 JPEG 实况重新排队；历史基线保持不变。实况查重同时校验 HEIC 与 MOV 的哈希，普通静态照片不视为实况的重复项。派生资源经验证后复用，损坏则重新转换；若 PhotoKit 提交结果尚未确认，保留回执并先核对图库，避免盲目重传。确认未提交的失败可以退避重试。
+
+转换在独立进程执行，默认 180 秒总超时；取消或超时后先等待子进程结束再清理本次转换临时目录。原图与正式配对缓存不会自动删除。
+
+**「已导入图库」只表示 PhotoKit 导入成功。** App 不把它当成服务端备份完成，不显示伪造的逐项 iCloud 上传百分比；请在系统「照片」中查看 iCloud 同步状态。
+
+原始 OPPO 文件不会删除。缓存也不会自动清理，需预留磁盘空间；iCloud 是否有足够容量由系统管理。不要删除同步台账来「重置失败」，否则重新建立基线可能把尚未同步的新增照片视为历史。
+
+## 数据位置
+
+- 台账、原图缓存、导入 journal：`~/Library/Application Support/OCloudSync/`
+- WebView 网站数据：macOS 为该 App 管理的 WebKit 数据目录。
+- 会话 Cookie：macOS 钥匙串条目 `dev.local.ocloudsync.oppo-session`，不写入普通日志、源码或报告。
+- `session-status.json` 仅保存续期状态、时间、成功／失败次数与数值响应码，不含 Cookie、账号或照片信息。
+- `ledger.json` 为原子持久化数据，进程锁禁止多个同步进程同时操作；损坏或未知 schema 时停止，不自动覆盖。
+
+OPPO 接口是当前官方网页的私有接口，适配器复用页面的登录、签名和加密逻辑，页面升级可能需要更新程序。第一版本地 ad-hoc 签名，未用 Developer ID 签名和公证，不作为公开分发安装包；重新编译可能触发 macOS 再次要求权限。
+
+## 构建与测试
+
+GitHub Actions 在推送、PR 和手动触发时运行测试、构建 Apple Silicon App，并提供 ZIP 与 SHA-256 校验文件（保留 14 天）。进入 [Actions](https://github.com/vissong/OCloudSync/actions/workflows/build.yml)，打开成功的运行，在 **Artifacts** 中下载。流程和本地复现见 [CI 说明](docs/CI.md)。
+
+依赖 macOS Xcode Command Line Tools / Swift 5.9+；运行 App 无需 Node、Ego 或 Python。Node 仅用于网页适配器的开发测试。
+
+```sh
+swift test
+node scripts/test-bridge.mjs
+node scripts/test-session.mjs
+python3 scripts/test-session-cancellation.py
+bash scripts/build-app.sh
+# 一次执行 CI 全部测试并生成 dist/ 下的安装包
+bash scripts/ci.sh
+```
+
+构建结果默认位于相邻 `OCloudSync-App/OCloudSync.app`。可通过 `OCLOUD_BUILD_DIR`、`OCLOUD_OUTPUT_DIR` 修改构建与交付目录。源码无第三方包依赖。
+
+关键代码：
+
+- `SyncCore/Ledger.swift`：基线、重试、去重台账、检查点、互斥及下载操作隔离。
+- `SyncCore/AlbumScanner.swift`：轻量检查与完整核对切换、分页完整性检查和统计。
+- `OCloudSync/WebSession.swift`、`Resources/bridge.js`：官方登录页、分页扫描、签名下载与取消。
+- `OCloudSync/CookieVault.swift`：登录会话钥匙串保存与恢复。
+- `OCloudSync/PhotoImporter.swift`：原图校验、图库查重与 PhotoKit 导入。
+- `OCloudSync/AppModel.swift`：定时调度、任务恢复、状态展示。
+- `SyncCore/MotionJPEG.swift`、`LivePhotoWorker/`：容器解析、配对转换及 Apple 校验。
+- `OCloudSync/LivePhotoConverter.swift`、`SyncCore/ConversionWorker.swift`：转换进程、缓存与取消清理。
+
+转换实现参考用户提供的本地 `MotionPhotoFromiPhotos` 项目的 `native/make_livephoto_with_audio.swift`；本程序没有使用其图库数据库修改或替换原照片流程。合成样本验证见 `scripts/test-livephoto.py`，不会访问照片图库。
+
+参考：[Apple WKDownload](https://developer.apple.com/documentation/webkit/wkdownload)、[Apple PhotoKit 文件导入](https://developer.apple.com/documentation/photos/phassetcreationrequest/addresource%28with%3Afileurl%3Aoptions%3A%29)、[OPPO 官方云相册](https://cloud.oppo.com/module.html#/photo)。
