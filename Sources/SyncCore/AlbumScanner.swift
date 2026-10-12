@@ -61,6 +61,8 @@ public enum AlbumScanner {
       reason = "手动完整核对"
     } else if !ledger.accounts.contains(account) {
       reason = "建立账号历史基线"
+    } else if ledger.videoBaselineAccounts?.contains(account) != true {
+      reason = "建立视频历史基线"
     } else if checkpoint == nil {
       reason = "首次建立检查点"
     } else if pendingAccounts.contains(account) {

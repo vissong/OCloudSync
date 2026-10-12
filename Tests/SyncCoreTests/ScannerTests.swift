@@ -170,4 +170,20 @@ final class ScannerTests: XCTestCase {
     XCTAssertEqual(ledger.records[record.id]?.state, .unavailable)
     XCTAssertTrue(ledger.due(at: now).isEmpty)
   }
+  func testVideoUpgradeForcesFullScanEvenWhenHeadAndCountMatch() async throws {
+    var ledger = Ledger()
+    try ledger.applyScan(try await scan(Source(assets(250))))
+    ledger.videoBaselineAccounts = nil
+    let source = Source(assets(250))
+    source.failAt = 2
+    do { _ = try await scan(source, ledger); XCTFail("Expected failure") } catch {}
+    XCTAssertNil(ledger.videoBaselineAccounts)
+    let result = try await scan(Source(assets(250)), ledger)
+    XCTAssertTrue(result.complete)
+    try ledger.applyScan(result)
+    XCTAssertEqual(ledger.videoBaselineAccounts, ["u1"])
+    let quick = try await scan(Source(assets(250)), ledger)
+    XCTAssertFalse(quick.complete)
+  }
+
 }

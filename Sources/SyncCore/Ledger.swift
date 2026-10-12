@@ -38,13 +38,15 @@ public struct RemoteAsset: Codable, Equatable, Sendable {
     Self.digest(Data([account, remoteID, version].joined(separator: "\u{0}").utf8))
   }
   public var supported: Bool {
-    mediaType == 1 && (!isMotion || isMotionJPEG)
+    if isVideo { return !isMotion && ["mp4", "mov", "m4v"].contains((filename as NSString).pathExtension.lowercased()) }
+    return mediaType == 1 && (!isMotion || isMotionJPEG)
       && ["jpg", "jpeg", "heic", "heif", "png"].contains(
         (filename as NSString).pathExtension.lowercased())
   }
   public var isMotionJPEG: Bool {
-    isMotion && ["jpg", "jpeg"].contains((filename as NSString).pathExtension.lowercased())
+    mediaType == 1 && isMotion && ["jpg", "jpeg"].contains((filename as NSString).pathExtension.lowercased())
   }
+  public var isVideo: Bool { mediaType == 3 }
   public static func digest(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
   }
@@ -52,7 +54,10 @@ public struct RemoteAsset: Codable, Equatable, Sendable {
     let h = try FileHandle(forReadingFrom: url)
     defer { try? h.close() }
     var hash = SHA256()
-    while let data = try h.read(upToCount: 1024 * 1024), !data.isEmpty { hash.update(data: data) }
+    while let data = try h.read(upToCount: 1024 * 1024), !data.isEmpty {
+      try Task.checkCancellation()
+      hash.update(data: data)
+    }
     return hash.finalize().map { String(format: "%02x", $0) }.joined()
   }
 }
@@ -116,6 +121,7 @@ public struct Ledger: Codable {
   // Optional for compatibility with existing schema-1 ledgers.
   public var scanCheckpoints: [String: ScanCheckpoint]?
   public var lastCheck: ScanSummary?
+  public var videoBaselineAccounts: Set<String>?
   public init() {}
   public mutating func applyScan(_ result: ScanResult) throws {
     if result.complete {
@@ -129,7 +135,8 @@ public struct Ledger: Codable {
         total: result.summary.total,
         headKeys: result.headKeys, fullScanAt: result.summary.checkedAt)
     } else {
-      guard accounts.contains(result.account), let checkpoint = scanCheckpoints?[result.account],
+      guard accounts.contains(result.account), videoBaselineAccounts?.contains(result.account) == true,
+        let checkpoint = scanCheckpoints?[result.account],
         checkpoint.total == result.summary.total, checkpoint.headKeys == result.headKeys,
         result.assets.allSatisfy({ $0.account == result.account && records[$0.key] != nil })
       else { throw SyncFailure("轻量检查不能建立或替换历史基线，请完整核对") }
@@ -146,15 +153,27 @@ public struct Ledger: Codable {
       })
     else { throw SyncFailure("云相册身份或文件信息不完整，未提交扫描") }
     let baseline = !accounts.contains(account)
+    let videoBaseline = videoBaselineAccounts?.contains(account) != true
+    if videoBaseline {
+      for key in Array(records.keys) where records[key]?.asset.account == account
+        && records[key]?.asset.isVideo == true
+        && [.unsupported, .unavailable].contains(records[key]!.state)
+      {
+        records[key]?.state = .baseline
+        records[key]?.error = nil
+      }
+    }
     for a in assets where records[a.key] == nil {
       records[a.key] = SyncRecord(
-        asset: a, state: baseline ? .baseline : (a.supported ? .pending : .unsupported))
+        asset: a, state: baseline || (videoBaseline && a.isVideo) ? .baseline : (a.supported ? .pending : .unsupported))
     }
     for a in assets where records[a.key]?.state == .unavailable {
       records[a.key]?.state = a.supported ? .pending : .unsupported
       records[a.key]?.error = nil
     }
     accounts.insert(account)
+    if videoBaselineAccounts == nil { videoBaselineAccounts = [] }
+    videoBaselineAccounts?.insert(account)
     lastScan = Date()
   }
   public func due(at: Date, account: String? = nil) -> [SyncRecord] {
@@ -173,7 +192,8 @@ public struct Ledger: Codable {
       records[key]?.state = .pending
     }
     for key in Array(records.keys)
-    where records[key]?.state == .unsupported && records[key]?.asset.supported == true {
+    where records[key]?.state == .unsupported && records[key]?.asset.supported == true
+      && (!records[key]!.asset.isVideo || videoBaselineAccounts?.contains(records[key]!.asset.account) == true) {
       records[key]?.state = .pending
       records[key]?.error = nil
     }

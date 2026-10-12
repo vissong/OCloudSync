@@ -193,7 +193,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
         try await withCheckedThrowingContinuation { continuation in
           pending = continuation
           watchdog = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 300_000_000_000)
+            try? await Task.sleep(nanoseconds: asset.isVideo ? 7_200_000_000_000 : 300_000_000_000)
             guard !Task.isCancelled, self?.gate.accepts(id) == true else { return }
             self?.cancelDownload(message: "下载超时，请稍后重试")
           }

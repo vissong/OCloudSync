@@ -111,7 +111,7 @@ import SyncCore
         work = nil
       }
       do {
-        status = "正在查找指定照片…"
+        status = "正在查找指定照片或视频…"
         let scan = try await web.scan { n, t in
           self.completed = n
           self.total = t
@@ -124,10 +124,10 @@ import SyncCore
           throw SyncFailure("找到 \(matches.count) 个同名文件，请使用唯一文件名")
         }
         guard a.supported, let importer, let cache else { throw SyncFailure("该文件类型暂不支持单张检查") }
-        status = "正在下载原图进行检查…"
-        let part = cache.appendingPathComponent(a.key + ".part")
+        status = "正在下载原文件进行检查…"
+        let part = cache.appendingPathComponent(a.key + ".part." + (a.filename as NSString).pathExtension.lowercased())
         _ = try await web.download(a, to: part)
-        let hash = try importer.validate(part, asset: a)
+        let hash = try await importer.validate(part, asset: a)
         let file = cache.appendingPathComponent(
           a.key + "." + (a.filename as NSString).pathExtension.lowercased())
         if FileManager.default.fileExists(atPath: file.path) {
@@ -145,7 +145,7 @@ import SyncCore
           id = try await importer.findExistingLive(filename: a.filename, manifest: pair.manifest)
         } else {
           id = try await importer.findExisting(
-            filename: a.filename, hash: hash, width: a.width, height: a.height)
+            asset: a, hash: hash)
         }
         struct Check: Codable {
           let filename: String
@@ -163,7 +163,7 @@ import SyncCore
           ).write(to: store.directory.appendingPathComponent("last-check.json"), options: .atomic)
         }
         status =
-          id != nil ? "检查通过：图库中已有相同原片／Live Photo 配对；没有再次导入" : "检查通过：原图完整，实况配对已校验（如适用）；本次仅检查，未导入"
+          id != nil ? "检查通过：图库中已有相同原片／Live Photo 配对；没有再次导入" : "检查通过：原文件完整，实况配对已校验（如适用）；本次仅检查，未导入"
       } catch is CancellationError { status = "检查已停止" } catch {
         status = error.localizedDescription
       }
@@ -332,6 +332,13 @@ import SyncCore
         r.livePhoto = manifest
         r.sha256 = manifest.sourceHash
       }
+      if r.asset.isVideo {
+        guard let hash = r.sha256 ?? receipt?.sourceHash else {
+          throw SyncFailure("缺少视频原文件校验回执，暂停重复导入")
+        }
+        try await importer.verifyOriginalVideo(id, hash: hash)
+        r.sha256 = hash
+      }
       r.photoID = id
       r.state = .imported
       r.error = nil
@@ -353,11 +360,23 @@ import SyncCore
       }
       throw SyncFailure("上次 Live Photo 导入结果尚未确认，保留回执并暂停重复导入；重试会先核对图库")
     }
+    if r.asset.isVideo && r.state == .importing {
+      if let hash = r.sha256 ?? receipt?.sourceHash,
+        let id = try await importer.findExisting(asset: r.asset, hash: hash)
+      {
+        r.photoID = id; r.sha256 = hash; r.state = .imported
+        r.error = nil; r.nextAttempt = nil
+        try save(r)
+        return
+      }
+      throw SyncFailure("上次视频导入结果尚未确认，保留回执并暂停重复导入；重试会先核对图库")
+    }
     let file = cache.appendingPathComponent(
       r.id + "." + (r.asset.filename as NSString).pathExtension.lowercased())
     var hash: String?
     if FileManager.default.fileExists(atPath: file.path) {
-      hash = try? importer.validate(file, asset: r.asset)
+      do { hash = try await importer.validate(file, asset: r.asset) }
+      catch is CancellationError { throw CancellationError() } catch {}
     }
     if hash == nil {
       guard sourceAvailable == true else {
@@ -368,10 +387,10 @@ import SyncCore
       }
       r.state = .downloading
       try save(r)
-      let part = cache.appendingPathComponent(r.id + ".part")
+      let part = cache.appendingPathComponent(r.id + ".part." + (r.asset.filename as NSString).pathExtension.lowercased())
       _ = try await web.download(r.asset, to: part)
       try Task.checkCancellation()
-      hash = try importer.validate(part, asset: r.asset)
+      hash = try await importer.validate(part, asset: r.asset)
       if FileManager.default.fileExists(atPath: file.path) {
         try FileManager.default.removeItem(at: file)
       }
@@ -421,6 +440,7 @@ import SyncCore
     if let id = ledger.duplicates(hash: hash, excluding: r.id, account: r.asset.account)
       .compactMap(\.photoID).first(where: { importer.exists($0) })
     {
+      if r.asset.isVideo { try await importer.verifyOriginalVideo(id, hash: hash) }
       r.photoID = id
       r.state = .duplicate
       r.error = nil
@@ -428,7 +448,7 @@ import SyncCore
       return
     }
     if let id = try await importer.findExisting(
-      filename: r.asset.filename, hash: hash, width: r.asset.width, height: r.asset.height)
+      asset: r.asset, hash: hash)
     {
       r.photoID = id
       r.state = .duplicate
@@ -439,7 +459,7 @@ import SyncCore
     try Task.checkCancellation()
     r.state = .importing
     try save(r)
-    let id = try await importer.importFile(file, asset: r.asset)
+    let id = try await importer.importFile(file, asset: r.asset, hash: hash)
     r.photoID = id
     r.state = .imported
     r.error = nil
