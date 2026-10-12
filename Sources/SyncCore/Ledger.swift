@@ -19,9 +19,12 @@ public struct RemoteAsset: Codable, Equatable, Sendable {
   public var mediaType: Int
   public var version: String
   public var isMotion: Bool
+  // OPPO datetaken is Unix milliseconds; optional for existing schema-1 ledgers.
+  public var dateTakenMilliseconds: Int64?
   public init(
     account: String, remoteID: String, fileID: String, filename: String, bytes: Int64, width: Int,
-    height: Int, mediaType: Int, version: String, isMotion: Bool
+    height: Int, mediaType: Int, version: String, isMotion: Bool,
+    dateTakenMilliseconds: Int64? = nil
   ) {
     self.account = account
     self.remoteID = remoteID
@@ -33,6 +36,12 @@ public struct RemoteAsset: Codable, Equatable, Sendable {
     self.mediaType = mediaType
     self.version = version
     self.isMotion = isMotion
+    self.dateTakenMilliseconds = dateTakenMilliseconds
+  }
+  public var captureDate: Date? {
+    guard let milliseconds = dateTakenMilliseconds, milliseconds > 0,
+      milliseconds < 253_402_300_800_000 else { return nil }
+    return Date(timeIntervalSince1970: Double(milliseconds) / 1000)
   }
   public var key: String {
     Self.digest(Data([account, remoteID, version].joined(separator: "\u{0}").utf8))

@@ -75,7 +75,19 @@ for (const exitResponse of [{errorCode:500},{errorCode:403},{errorCode:null},{er
  assert.equal(f.b.prepared(p.ticket).kind,exitResponse.errorCode===403?'loginRequired':'failed');
  assert.throws(()=>f.b.begin(),/FRESH_LIST_REQUIRED/);
 }
-console.log('bridge tests: 22 groups passed');
+{
+ const {b,item}=fixture();
+ for (const value of [1787742871054,'1787742871054']) {
+  item.datetaken=value;assert.equal(b.read().items[0].dateTakenMilliseconds,1787742871054);
+ }
+ const key=b.read().items[0].version;
+ for (const value of [undefined,null,'',0,-1,true,'2026-10-01',Infinity,Number.MAX_SAFE_INTEGER]) {
+  item.datetaken=value;item.uploadTime=1787742871054;
+  assert.equal(b.read().items[0].dateTakenMilliseconds,null);
+  assert.equal(b.read().items[0].version,key);
+ }
+}
+console.log('bridge tests: 23 groups passed');
 
 async function preparedFixture(){
  const f=fixture();const p=f.b.prepare();f.releaseExit();await new Promise(resolve=>setImmediate(resolve));

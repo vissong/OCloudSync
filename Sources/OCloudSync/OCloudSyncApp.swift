@@ -49,13 +49,14 @@ struct Dashboard: View {
           nav("同步概览", icon: "square.grid.2x2", index: 0)
           nav("OPPO 登录", icon: "person.crop.circle", index: 1)
           nav("任务记录", icon: "list.bullet.rectangle", index: 2)
+          nav("按时间导入", icon: "calendar", index: 3)
         }
         Spacer()
         VStack(alignment: .leading, spacing: 8) {
-          Label("仅同步新增照片与视频", systemImage: "sparkles")
+          Label("自动同步新增照片与视频", systemImage: "sparkles")
           Text("关闭窗口后继续运行\n退出 App 后停止同步").font(.caption).foregroundStyle(.secondary)
         }
-        Text("本地版本 0.4.0").font(.caption2).foregroundStyle(.tertiary)
+        Text("本地版本 0.5.0").font(.caption2).foregroundStyle(.tertiary)
       }.padding(24).frame(width: 185).background(Color(nsColor: .controlBackgroundColor))
       Divider()
       VStack(alignment: .leading, spacing: 20) {
@@ -78,12 +79,14 @@ struct Dashboard: View {
             Spacer()
             Button("返回概览") { tab = 0 }
           }
+        } else if tab == 3 {
+          RangeImportView(model: model)
         } else if tab == 2 {
           Text("任务记录").font(.largeTitle.weight(.semibold))
-          Text("历史基线 \(model.baseline) 项。下方列出启用后的新增与修改记录。").foregroundStyle(.secondary)
+          Text("历史基线 \(model.baseline) 项。下方列出自动同步及手动导入记录。").foregroundStyle(.secondary)
           HStack {
             TextField("输入完整文件名，单独检查下载与查重", text: $checkFilename)
-            Button("检查一张照片") { model.checkOne(filename: checkFilename) }.disabled(
+            Button("检查原文件") { model.checkOne(filename: checkFilename) }.disabled(
               model.busy || checkFilename.isEmpty || model.fatal != nil)
           }
           Text(model.status).font(.caption).foregroundStyle(.secondary)
@@ -162,6 +165,16 @@ struct Dashboard: View {
         }
       }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+    .onChange(of: tab) { value in
+      if value == 3 { model.rangePageOpen = true }
+      else { model.leaveRangePage() }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { event in
+      guard let window = event.object as? NSWindow, window.title == "OPPO 照片同步" else { return }
+      model.leaveRangePage()
+      tab = 0
+    }
+    .onDisappear { model.leaveRangePage() }
   }
   private var sessionStatus: some View {
     VStack(alignment: .leading, spacing: 4) {
@@ -180,7 +193,7 @@ struct Dashboard: View {
       Label(text, systemImage: icon).frame(maxWidth: .infinity, alignment: .leading).padding(10)
         .background(
           tab == index ? accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 8))
-    }.buttonStyle(.plain)
+    }.buttonStyle(.plain).disabled(model.busy && (tab == 3 || index == 3))
   }
   private func metric(_ title: String, value: Int) -> some View {
     VStack(alignment: .leading, spacing: 7) {

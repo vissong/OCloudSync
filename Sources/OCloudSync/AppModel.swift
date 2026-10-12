@@ -13,6 +13,11 @@ import SyncCore
   @Published var completed = 0
   @Published var total = 0
   @Published var intervalMinutes = 15
+  @Published var rangePreview: DateRangePreview?
+  @Published var rangeStatus = "选择拍摄日期并预览，再勾选需要导入的文件"
+  @Published var rangeSelected = Set<String>()
+  @Published var rangePageOpen = false
+  @Published var rangeImporting = false
   let web = WebSession()
   private var store: LedgerStore?
   private var importer: PhotoImporter?
@@ -178,6 +183,99 @@ import SyncCore
       run()
     } catch { stopForStorage(error) }
   }
+  func leaveRangePage() {
+    guard rangePageOpen else { return }
+    rangePageOpen = false
+    clearRangePreview()
+    // Closing the window cancels an unfinished preview, not an authorized import.
+    if !rangeImporting { work?.cancel() }
+  }
+  func clearRangePreview() {
+    rangePreview = nil
+    rangeSelected = []
+  }
+  func previewRange(start: Date, end: Date, photos: Bool, videos: Bool) {
+    guard !busy, fatal == nil else { return }
+    clearRangePreview()
+    let range: ImportDateRange
+    do { range = try ImportDateRange(startDay: start, endDay: end) }
+    catch { rangeStatus = error.localizedDescription; return }
+    busy = true
+    work = Task {
+      defer { busy = false; work = nil }
+      do {
+        rangeStatus = "正在读取完整清单，仅预览，不下载或导入…"
+        let scan = try await web.scan(forceFull: true) { n, t in
+          self.completed = n; self.total = t
+          self.rangeStatus = "正在读取完整清单：\(n) / \(t) 项…"
+        }
+        try Task.checkCancellation()
+        guard rangePageOpen else { return }
+        let preview = try DateRangePreview(scan: scan, range: range, includePhotos: photos, includeVideos: videos)
+        rangePreview = preview
+        rangeSelected = preview.eligibleKeys(in: ledger)
+        rangeStatus = "预览完成，尚未导入。确认勾选项后点击导入。"
+      } catch is CancellationError { rangeStatus = "预览已取消" }
+      catch { rangeStatus = error.localizedDescription }
+    }
+  }
+  func importRange() {
+    guard !busy, fatal == nil, let preview = rangePreview, !rangeSelected.isEmpty else { return }
+    let selected = rangeSelected
+    busy = true
+    rangeImporting = true
+    work = Task {
+      defer { busy = false; rangeImporting = false; work = nil }
+      do {
+        guard let importer, let cache else { throw SyncFailure("本地缓存不可用") }
+        try importer.checkPermission()
+        rangeStatus = "正在重新核对选中项目，准备导入…"
+        let scan = try await web.scan(forceFull: true) { n, t in
+          self.completed = n; self.total = t
+          self.rangeStatus = "导入前核对清单：\(n) / \(t) 项…"
+        }
+        try Task.checkCancellation()
+        var changed = ledger
+        let keys = try changed.queueRangeImport(preview, selectedKeys: selected, freshScan: scan)
+        try persist(changed)
+        clearRangePreview()
+        activeAccount = scan.account
+        total = keys.count; completed = 0
+        // A manual range import must not drain unrelated automatic or historical tasks.
+        for key in keys {
+          try Task.checkCancellation()
+          guard let record = ledger.records[key] else { throw SyncFailure("导入任务记录缺失") }
+          rangeStatus = "正在导入 \(completed + 1) / \(total)：\(record.asset.filename)"
+          status = rangeStatus
+          do { try await process(record, importer: importer, cache: cache, sourceAvailable: true) }
+          catch is CancellationError { throw CancellationError() }
+          catch { try recordFailure(error, for: record) }
+          completed += 1
+          if web.needsRescan { break }
+          try await Task.sleep(nanoseconds: 1_200_000_000)
+        }
+        let done = keys.filter { [.imported, .duplicate].contains(ledger.records[$0]!.state) }.count
+        rangeStatus = "本次已导入或跳过重复 \(done) / \(keys.count) 项。其余进度已保留，可在同步概览继续扫描或重试。iCloud 上传由系统照片管理。"
+        status = rangeStatus
+      } catch is CancellationError {
+        var recovered = ledger; recovered.recoverInterrupted()
+        do { try persist(recovered) } catch { stopForStorage(error) }
+        clearRangePreview()
+        rangeStatus = "已停止，任务进度已保留；可在同步概览继续扫描或重试"
+      } catch {
+        if error is SessionAccessFailure {
+          var recovered = ledger; recovered.recoverInterrupted()
+          do { try persist(recovered) } catch { stopForStorage(error) }
+        }
+        clearRangePreview()
+        rangeStatus = error.localizedDescription
+      }
+    }
+  }
+  func cancelRangeWork() {
+    work?.cancel()
+    clearRangePreview()
+  }
   var syncHeadline: String {
     if !enabled { return "自动同步已停止" }
     switch session.state {
@@ -191,7 +289,7 @@ import SyncCore
   private func tick() {
     guard enabled, fatal == nil else { return }
     web.maintainSession()
-    guard !busy, session.state == .active else { return }
+    guard !busy, !rangePageOpen, session.state == .active else { return }
     if Date() >= nextScan
       || (activeAccount != nil && !ledger.due(at: Date(), account: activeAccount).isEmpty)
     {
@@ -233,7 +331,7 @@ import SyncCore
           self.status = "轻量检查完成，总数与首批无变化；每日完整核对其余照片"
           return
         }
-        if isBaseline {
+        if isBaseline && self.ledger.due(at: Date(), account: account).isEmpty {
           self.status = "基线已建立：\(assets.count) 项历史文件；此后只同步新增照片"
           return
         }

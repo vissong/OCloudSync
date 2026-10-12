@@ -30,13 +30,17 @@
     }
     return component;
   }
+  function captureTime(value) {
+    const number=typeof value==='number'||typeof value==='string'&&/^\d+$/.test(value)?Number(value):NaN;
+    return Number.isSafeInteger(number)&&number>0&&number<253402300800000?number:null;
+  }
   function row(a) {
     const account=String(a.userId||''),id=String(a.globalUniqId||a.globalId||''),fileID=String(a.oosId||a.fileId||'');
     let ext={};try{ext=JSON.parse(a.fileExtension||'{}')}catch{throw new Error('UNSUPPORTED_METADATA')}
     if(!account||!id||!fileID||!(Number(a.fileSize)>0))throw new Error('INVALID_ASSET');
     // Include immutable resource identity and content metadata, not album/UI update times.
     const version=JSON.stringify([fileID,a.fileSize,a.fileModifyTime||0,a.width,a.height,a.fileMD5||'']);
-    const result={account,remoteID:id,fileID,filename:String(a.fileName||''),bytes:Number(a.fileSize),width:Number(a.width||0),height:Number(a.height||0),mediaType:Number(a.fileMediaType),version,isMotion:!!Number(ext.isOlive||0)};
+    const result={account,remoteID:id,fileID,filename:String(a.fileName||''),bytes:Number(a.fileSize),width:Number(a.width||0),height:Number(a.height||0),mediaType:Number(a.fileMediaType),version,isMotion:!!Number(ext.isOlive||0),dateTakenMilliseconds:captureTime(a.datetaken)};
     cache.set(account+'\0'+id+'\0'+version,a);
     return result;
   }
