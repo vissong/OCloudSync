@@ -52,10 +52,10 @@ struct Dashboard: View {
         }
         Spacer()
         VStack(alignment: .leading, spacing: 8) {
-          Label("仅同步新增照片", systemImage: "sparkles")
+          Label("仅同步新增照片与视频", systemImage: "sparkles")
           Text("关闭窗口后继续运行\n退出 App 后停止同步").font(.caption).foregroundStyle(.secondary)
         }
-        Text("本地版本 0.3.2").font(.caption2).foregroundStyle(.tertiary)
+        Text("本地版本 0.4.0").font(.caption2).foregroundStyle(.tertiary)
       }.padding(24).frame(width: 185).background(Color(nsColor: .controlBackgroundColor))
       Divider()
       VStack(alignment: .leading, spacing: 20) {
@@ -142,7 +142,7 @@ struct Dashboard: View {
           VStack(alignment: .leading, spacing: 16) {
             setupRow("1", "登录 OPPO", "使用官方账号、短信或扫码流程，过期后可重新登录。", "打开登录页") { tab = 1 }
             Divider()
-            setupRow("2", "允许访问照片图库", "用于核对重复原片，并将新增照片导入系统图库。", "授权照片访问") { model.authorize() }
+            setupRow("2", "允许访问照片图库", "用于核对重复原片，并将新增照片和视频导入系统图库。", "授权照片访问") { model.authorize() }
             Divider()
             setupRow("3", "检查 iCloud 照片", "请在“照片”设置中启用 iCloud；逐项上传状态由系统管理。", "打开照片") {
               model.openPhotos()
@@ -151,12 +151,12 @@ struct Dashboard: View {
             Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 16))
           HStack {
             Text(
-              "首次扫描只建立基线。支持普通 JPEG / HEIC / PNG 及 OPPO JPEG 实况；视频与其他实况格式暂不导入。\n已下载原图会留在本机缓存，源照片不会被删除。"
+              "照片与视频首次启用时分别建立历史基线。支持 JPEG / HEIC / PNG、OPPO JPEG 实况，以及 MP4 / MOV / M4V 视频。\n视频原文件直接导入，不转码；已下载原文件保留在本机缓存，云端文件不会被删除。"
             ).font(
               .caption
             ).foregroundStyle(.secondary)
             Spacer()
-            Button("查看原图缓存") { model.revealCache() }
+            Button("查看原文件缓存") { model.revealCache() }
           }
           Spacer(minLength: 0)
         }

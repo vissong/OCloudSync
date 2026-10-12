@@ -13,6 +13,7 @@ final class PhotoImporter {
   struct Receipt: Codable {
     let photoID: String
     var livePhoto: LivePhotoManifest?
+    var sourceHash: String?
   }
   let journalDirectory: URL
   init(directory: URL) throws {
@@ -43,18 +44,16 @@ final class PhotoImporter {
     guard FileManager.default.fileExists(atPath: url.path) else { return nil }
     return try JSONDecoder().decode(Receipt.self, from: Data(contentsOf: url))
   }
-  func validate(_ file: URL, asset: RemoteAsset) throws -> String {
-    let size = (try FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?
-      .int64Value
-    guard size == asset.bytes else { throw SyncFailure("下载文件大小与云端不一致，将重新下载") }
-    guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
-      asset.isMotionJPEG ? CGImageSourceGetCount(source) >= 1 : CGImageSourceGetCount(source) == 1,
-      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-      let width = properties[kCGImagePropertyPixelWidth] as? Int,
-      let height = properties[kCGImagePropertyPixelHeight] as? Int,
-      width == asset.width, height == asset.height
-    else { throw SyncFailure("原图格式或像素校验未通过，将保留错误状态") }
-    return try RemoteAsset.hashFile(file)
+  func validate(_ file: URL, asset: RemoteAsset) async throws -> String {
+    try await MediaFileValidator.validate(file, asset: asset)
+  }
+  func verifyOriginalVideo(_ id: String, hash: String) async throws {
+    try checkPermission()
+    guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: lookupOptions()).firstObject,
+      asset.mediaType == .video,
+      let resource = PHAssetResource.assetResources(for: asset).first(where: { $0.type == .video }),
+      try await resourceHash(resource) == hash
+    else { throw SyncFailure("图库视频原文件校验未通过，保留回执并暂停重复导入") }
   }
   func verifyLiveAsset(_ id: String, manifest: LivePhotoManifest) async throws {
     try checkPermission()
@@ -147,16 +146,16 @@ final class PhotoImporter {
     return identifier
   }
   /// A filename is only a candidate filter; bytes determine duplication.
-  func findExisting(filename: String, hash: String, width: Int, height: Int) async throws -> String?
+  func findExisting(asset: RemoteAsset, hash: String) async throws -> String?
   {
     try checkPermission()
     let options = lookupOptions()
-    options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+    options.predicate = NSPredicate(format: "mediaType == %d", (asset.isVideo ? PHAssetMediaType.video : .image).rawValue)
     let assets = PHAsset.fetchAssets(with: options)
     var candidates = [(String, PHAssetResource)]()
     assets.enumerateObjects { a, _, _ in
       for r in PHAssetResource.assetResources(for: a)
-      where r.type == .photo && r.originalFilename.caseInsensitiveCompare(filename) == .orderedSame
+      where r.type == (asset.isVideo ? .video : .photo) && r.originalFilename.caseInsensitiveCompare(asset.filename) == .orderedSame
       { candidates.append((a.localIdentifier, r)) }
     }
     for (id, r) in candidates {
@@ -172,31 +171,44 @@ final class PhotoImporter {
         try await operation.read(resource)
       }, onCancel: { operation.cancel(CancellationError()) })
   }
-  func importFile(_ file: URL, asset: RemoteAsset) async throws -> String {
-    try checkPermission()
+  func importFile(_ file: URL, asset: RemoteAsset, hash: String) async throws -> String {
+    do {
+      try Task.checkCancellation()
+      try checkPermission()
+      guard try await validate(file, asset: asset) == hash else {
+        throw SyncFailure("原文件在导入前发生变化")
+      }
+      try Task.checkCancellation()
+    } catch {
+      throw ConfirmedImportFailure("导入前检查未通过，可重试：" + error.localizedDescription)
+    }
     let journal = journalDirectory.appendingPathComponent(asset.key + ".json")
     var identifier: String?
     var journalError: Error?
-    try await PHPhotoLibrary.shared().performChanges {
-      let request = PHAssetCreationRequest.forAsset()
-      let options = PHAssetResourceCreationOptions()
-      options.originalFilename = (asset.filename as NSString).lastPathComponent
-      request.addResource(with: .photo, fileURL: file, options: options)
-      identifier = request.placeholderForCreatedAsset?.localIdentifier
-      if let id = identifier {
-        do {
-          try JSONEncoder().encode(Receipt(photoID: id)).write(to: journal, options: .atomic)
-          try FileManager.default.setAttributes(
-            [.posixPermissions: 0o600], ofItemAtPath: journal.path)
-        } catch { journalError = error }
+    do {
+      try await PHPhotoLibrary.shared().performChanges {
+        let request = PHAssetCreationRequest.forAsset()
+        let options = PHAssetResourceCreationOptions()
+        options.originalFilename = (asset.filename as NSString).lastPathComponent
+        request.addResource(with: asset.isVideo ? .video : .photo, fileURL: file, options: options)
+        identifier = request.placeholderForCreatedAsset?.localIdentifier
+        if let id = identifier {
+          do {
+            try JSONEncoder().encode(Receipt(photoID: id, sourceHash: hash)).write(to: journal, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: journal.path)
+          } catch { journalError = error }
+        }
       }
+    } catch {
+      try? FileManager.default.removeItem(at: journal)
+      throw ConfirmedImportFailure("系统明确拒绝了照片或视频导入，已保留原文件，将稍后重试")
     }
-    guard let identifier else { throw SyncFailure("Photos 未返回资产标识，下一轮将先核对重复项") }
-    if journalError != nil
-    { /* The successful return still lets the durable ledger retain the ID. */
-    }
+    if let journalError { throw journalError }
+    guard let identifier else { throw SyncFailure("图库导入结果不确定，将先核对回执") }
+    if asset.isVideo { try await verifyOriginalVideo(identifier, hash: hash) }
     return identifier
   }
+
 }
 
 /// Owns one PhotoKit resource request, including cancellation before its ID is assigned.
@@ -220,7 +232,7 @@ private final class PhotoReadOperation: @unchecked Sendable {
       }
       timeout = timer
       lock.unlock()
-      DispatchQueue.global().asyncAfter(deadline: .now() + 120, execute: timer)
+      DispatchQueue.global().asyncAfter(deadline: .now() + (resource.type == .video ? 1800 : 120), execute: timer)
       let options = PHAssetResourceRequestOptions()
       options.isNetworkAccessAllowed = true
       let request = PHAssetResourceManager.default().requestData(
