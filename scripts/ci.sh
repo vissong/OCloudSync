@@ -14,6 +14,7 @@ swift test --package-path "$PROJECT_DIR" --scratch-path "$BUILD_DIR"
 node "$PROJECT_DIR/scripts/test-bridge.mjs"
 node "$PROJECT_DIR/scripts/test-session.mjs"
 python3 "$PROJECT_DIR/scripts/test-session-cancellation.py"
+python3 "$PROJECT_DIR/scripts/test-scan-retirement.py"
 
 OCLOUD_BUILD_DIR="$BUILD_DIR" OCLOUD_OUTPUT_DIR="$OUTPUT_DIR" \
   bash "$PROJECT_DIR/scripts/build-app.sh"

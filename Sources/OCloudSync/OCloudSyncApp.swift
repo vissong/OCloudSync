@@ -55,7 +55,7 @@ struct Dashboard: View {
           Label("仅同步新增照片", systemImage: "sparkles")
           Text("关闭窗口后继续运行\n退出 App 后停止同步").font(.caption).foregroundStyle(.secondary)
         }
-        Text("本地版本 0.3.1").font(.caption2).foregroundStyle(.tertiary)
+        Text("本地版本 0.3.2").font(.caption2).foregroundStyle(.tertiary)
       }.padding(24).frame(width: 185).background(Color(nsColor: .controlBackgroundColor))
       Divider()
       VStack(alignment: .leading, spacing: 20) {
