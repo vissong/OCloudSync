@@ -25,6 +25,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
   private var sessionTask: Task<Void, Never>?
   private var sessionJobID: UUID?
   private var wakeObserver: NSObjectProtocol?
+  private var documentGeneration: UInt64 = 0
   var requiresLogin: Bool { session.state == .loginRequired }
 
   override init() {
@@ -97,14 +98,39 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
     }
   }
   private struct Marker: Decodable { let serial: Int }
-  func read() async throws -> ScanPage {
-    try await evaluate("window.OCloudBridge.read()", as: ScanPage.self)
+  private struct ListPreparation: Decodable {
+    let ticket: Int
+    let kind: String?
+    let code: Int?
+  }
+  private func prepareFreshList() async throws {
+    let started = try await evaluate("window.OCloudBridge.prepare()", as: ListPreparation.self)
+    for _ in 0..<90 {
+      try Task.checkCancellation()
+      let result = try await evaluate(
+        "window.OCloudBridge.prepared(\(started.ticket))", as: ListPreparation.self)
+      switch result.kind {
+      case "ready": return
+      case "loginRequired":
+        resetSession(loginRequired: true)
+        throw SessionAccessFailure(.loginRequired)
+      case "pending": try await Task.sleep(nanoseconds: 500_000_000)
+      default:
+        let detail = result.code.map { "接口状态 \($0)" } ?? "页面接口暂不可用"
+        throw SyncFailure("无法刷新 OPPO 下载清单（\(detail)），本次未使用旧清单，请稍后重试")
+      }
+    }
+    resetSession(loginRequired: false)
+    session.pageLoadFailed(at: Date())
+    publishSession()
+    throw SessionAccessFailure(.retrying)
   }
   func wait(after serial: Int) async throws -> ScanPage {
     for _ in 0..<90 {
       try Task.checkCancellation()
-      let page = try await read()
-      if page.serial > serial { return page }
+      if let page = try await evaluate(
+        "window.OCloudBridge.read(\(serial))", as: ScanPage?.self)
+      { return page }
       try await Task.sleep(nanoseconds: 500_000_000)
     }
     throw SyncFailure("OPPO 列表请求超时，本次不提交基线；稍后可重试")
@@ -115,7 +141,20 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
   ) async throws -> ScanResult {
     try await ensureSession()
     let generation = session.pageGeneration
+    let document = documentGeneration
+    var completed = false
+    defer {
+      // Retire late page callbacks after interruption, including wake-up without navigation.
+      // A newer document or an already scheduled recovery must keep its own session state.
+      if !completed, documentGeneration == document, !requiresLogin, !session.needsPageReload {
+        resetSession(loginRequired: false)
+        session.pageLoadFailed(at: Date())
+        publishSession()
+      }
+    }
     try await installBridge()
+    try session.validatePage(generation)
+    try await prepareFreshList()
     try session.validatePage(generation)
     let result = try await AlbumScanner.scan(
       ledger: ledger, forceFull: forceFull,
@@ -132,6 +171,8 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
         return try await self.wait(after: marker.serial)
       }, progress: progress)
     try session.validatePage(generation)
+    try Task.checkCancellation()
+    completed = true
     needsRescan = false
     return result
   }
@@ -385,6 +426,7 @@ extension WebSession {
   }
   func webView(_ view: WKWebView, didCommit navigation: WKNavigation!) {
     guard view === webView else { return }
+    documentGeneration &+= 1
     if session.pageCommitted(path: view.url?.path, at: Date()) {
       publishSession()
     }
