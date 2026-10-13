@@ -38,6 +38,8 @@ import Foundation
   var rangeStatus = "", rangeSelected = Set<String>(), rangePageOpen = true, rangeImporting = false
   var work: Task<Void,Never>?, importer: Importer? = Importer(), cache: URL? = URL(fileURLWithPath:"/unused")
   var activeAccount: String?, completed = 0, total = 0, status = "", intervalMinutes = 15
+  var importProgress: ImportProgress?
+  var localRecoveryProgress: ImportProgress?, importProgressIsRange = false
   var enabled = false, session = SessionLease(), nextScan = Date.distantPast, runs = 0
   let web = Web()
   var processed = [String](), failSession = false, failFile = false, persisted = 0
@@ -53,9 +55,20 @@ import Foundation
     if failFile { throw SyncFailure("download failed") }
     r.state = .imported; ledger.records[r.id]=r
   }
-  func recordFailure(_ error: Error, for record: SyncRecord) throws {
+  func recordFailure(_ error: Error, for record: SyncRecord, onRecorded: (() -> Void)? = nil) throws {
     if error is SessionAccessFailure { throw error }
     var r = ledger.records[record.id] ?? record; r.fail("retryable"); ledger.records[r.id]=r
+    onRecorded?()
+  }
+  // Queue selection is exercised here; actual pipeline stages have separate production-spy tests.
+  func processQueue(_ records: [SyncRecord], importer: Importer, cache: URL,
+    present: Set<String>, isRange: Bool = false) async throws {
+    total = records.count; completed = 0
+    for r in records {
+      do { try await process(r, importer: importer, cache: cache, sourceAvailable: present.contains(r.id)) }
+      catch { try recordFailure(error, for: r) }
+      completed += 1
+    }
   }
 __METHODS__
 }

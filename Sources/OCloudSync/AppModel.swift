@@ -12,6 +12,9 @@ import SyncCore
   @Published var fatal: String?
   @Published var completed = 0
   @Published var total = 0
+  @Published var importProgress: ImportProgress?
+  @Published var localRecoveryProgress: ImportProgress?
+  @Published var importProgressIsRange = false
   @Published var downloadProgress: DownloadProgress?
   @Published var intervalMinutes = 15
   @Published var rangePreview: DateRangePreview?
@@ -114,6 +117,10 @@ import SyncCore
       return
     }
     busy = true
+    importProgress = nil
+    localRecoveryProgress = nil
+    importProgressIsRange = false
+    completed = 0; total = 0
     work = Task {
       defer {
         busy = false
@@ -205,6 +212,10 @@ import SyncCore
     do { range = try ImportDateRange(startDay: start, endDay: end) }
     catch { rangeStatus = error.localizedDescription; return }
     busy = true
+    importProgress = nil
+    localRecoveryProgress = nil
+    importProgressIsRange = false
+    completed = 0; total = 0
     work = Task {
       defer { busy = false; work = nil }
       do {
@@ -227,6 +238,10 @@ import SyncCore
     guard !busy, fatal == nil, let preview = rangePreview, !rangeSelected.isEmpty else { return }
     let selected = rangeSelected
     busy = true
+    importProgress = nil
+    localRecoveryProgress = nil
+    importProgressIsRange = false
+    completed = 0; total = 0
     rangeImporting = true
     work = Task {
       defer { busy = false; rangeImporting = false; work = nil }
@@ -244,20 +259,13 @@ import SyncCore
         try persist(changed)
         clearRangePreview()
         activeAccount = scan.account
-        total = keys.count; completed = 0
         // A manual range import must not drain unrelated automatic or historical tasks.
-        for key in keys {
-          try Task.checkCancellation()
+        let queue = try keys.map { key in
           guard let record = ledger.records[key] else { throw SyncFailure("导入任务记录缺失") }
-          rangeStatus = "正在导入 \(completed + 1) / \(total)：\(record.asset.filename)"
-          status = rangeStatus
-          do { try await process(record, importer: importer, cache: cache, sourceAvailable: true) }
-          catch is CancellationError { throw CancellationError() }
-          catch { try recordFailure(error, for: record) }
-          completed += 1
-          if web.needsRescan { break }
-          try await Task.sleep(nanoseconds: 1_200_000_000)
+          return record
         }
+        try await processQueue(queue, importer: importer, cache: cache,
+          present: Set(scan.assets.map(\.key)), isRange: true)
         let done = keys.filter { [.imported, .duplicate].contains(ledger.records[$0]!.state) }.count
         rangeStatus = "本次已导入或跳过重复 \(done) / \(keys.count) 项。其余进度已保留，可在同步概览继续扫描或重试。iCloud 上传由系统照片管理。"
         status = rangeStatus
@@ -283,6 +291,10 @@ import SyncCore
   func checkDates() {
     guard !busy, fatal == nil, let importer, let cache else { return }
     busy = true
+    importProgress = nil
+    localRecoveryProgress = nil
+    importProgressIsRange = false
+    completed = 0; total = 0
     datePreview = nil
     let records = ledger.records.values.filter { $0.state == .imported }.sorted { $0.id < $1.id }
     work = Task {
@@ -299,6 +311,10 @@ import SyncCore
   func repairDates() {
     guard !busy, fatal == nil, let importer, let preview = datePreview, !preview.items.isEmpty else { return }
     busy = true
+    importProgress = nil
+    localRecoveryProgress = nil
+    importProgressIsRange = false
+    completed = 0; total = 0
     datePreview = nil
     work = Task {
       defer { busy = false; work = nil }
@@ -346,6 +362,10 @@ import SyncCore
   func run(forceFull: Bool = false) {
     guard !busy, fatal == nil else { return }
     busy = true
+    importProgress = nil
+    localRecoveryProgress = nil
+    importProgressIsRange = false
+    completed = 0; total = 0
     work = Task { [weak self] in
       guard let self else { return }
       defer {
@@ -392,23 +412,10 @@ import SyncCore
           throw SyncFailure("本地缓存不可用")
         }
         try importer.checkPermission()
-        self.total = queue.count
-        self.completed = 0
-        for record in queue {
-          try Task.checkCancellation()
-          self.status = "正在处理：\(record.asset.filename)"
-          do {
-            try await self.process(
-              record, importer: importer, cache: cache, sourceAvailable: present.contains(record.id)
-            )
-          } catch is CancellationError { throw CancellationError() } catch {
-            try self.recordFailure(error, for: record)
-          }
-          self.completed += 1
-          if self.web.needsRescan { break }
-          try await Task.sleep(nanoseconds: 1_200_000_000)
-        }
-        self.status = "本轮完成。导入结果已保存；iCloud 上传进度请在“照片”中查看"
+        try await self.processQueue(queue, importer: importer, cache: cache, present: present)
+        self.status = self.web.needsRescan
+          ? "本轮已暂停，需重新扫描；任务进度已保留"
+          : "本轮处理结束，结果见下方明细；iCloud 上传进度请在“照片”中查看"
       } catch is CancellationError {
         var recovered = self.ledger
         recovered.recoverInterrupted()
@@ -429,22 +436,32 @@ import SyncCore
   }
   private func recoverLocalWork() async throws {
     guard let importer, let cache, (try? importer.checkPermission()) != nil else { return }
-    for record in ledger.due(at: Date()) {
+    let records = ledger.due(at: Date()).filter { record in
       let file = cache.appendingPathComponent(
         record.id + "." + (record.asset.filename as NSString).pathExtension.lowercased())
-      guard record.state == .importing || FileManager.default.fileExists(atPath: file.path) else {
-        continue
-      }
+      return record.state == .importing || FileManager.default.fileExists(atPath: file.path)
+    }
+    if !records.isEmpty { localRecoveryProgress = ImportProgress(total: records.count) }
+    for record in records {
       try Task.checkCancellation()
       status = "正在恢复本地任务：\(record.asset.filename)"
       do {
         try await process(record, importer: importer, cache: cache, sourceAvailable: nil)
       } catch is CancellationError { throw CancellationError() } catch {
-        try recordFailure(error, for: record)
+        try recordFailure(error, for: record) {
+          if let state = self.ledger.records[record.id]?.state {
+            self.localRecoveryProgress?.finish(key: record.id, state: state)
+          }
+        }
+      }
+      if let state = ledger.records[record.id]?.state {
+        localRecoveryProgress?.finish(key: record.id, state: state)
       }
     }
   }
-  private func recordFailure(_ error: Error, for record: SyncRecord) throws {
+  private func recordFailure(
+    _ error: Error, for record: SyncRecord, onRecorded: (() -> Void)? = nil
+  ) throws {
     if fatal != nil { throw error }
     // The resources are already committed and verified; only their date needs repair.
     if let dateFailure = error as? DateVerificationPending {
@@ -454,6 +471,7 @@ import SyncCore
       committed.nextAttempt = nil
       committed.error = dateFailure.localizedDescription
       try save(committed)
+      onRecorded?()
       return
     }
     // Preserve a confirmed non-commit even if login expiration or cancellation happens concurrently.
@@ -461,6 +479,7 @@ import SyncCore
       var failed = ledger.records[record.id] ?? record
       failed.fail(error.localizedDescription, importWasNotCommitted: true)
       try save(failed)
+      onRecorded?()
       try Task.checkCancellation()
       if web.requiresLogin { throw SessionAccessFailure(.loginRequired) }
       return
@@ -471,9 +490,110 @@ import SyncCore
     var failed = ledger.records[record.id] ?? record
     failed.fail(error.localizedDescription)
     try save(failed)
+    onRecorded?()
+  }
+  private struct ValidatedOriginal: Sendable {
+    let file: URL
+    let hash: String
+  }
+  private struct PreparedQueueItem: Sendable {
+    let key: String
+    let original: ValidatedOriginal?
+    let skip: Bool
+  }
+  /// One original can be downloaded ahead while the single consumer converts, deduplicates and imports.
+  private func processQueue(
+    _ records: [SyncRecord], importer: PhotoImporter, cache: URL, present: Set<String>,
+    isRange: Bool = false
+  ) async throws {
+    total = records.count; completed = 0
+    importProgress = ImportProgress(total: records.count)
+    importProgressIsRange = isRange
+    try await ImportPipeline.run(items: records,
+      canPrepare: { !self.web.needsRescan && self.fatal == nil },
+      prepare: { input in
+        try Task.checkCancellation()
+        let record = self.ledger.records[input.id] ?? input
+        do {
+          let receipt = try importer.receipt(for: record.id)
+          let hasReceipt = (record.photoID ?? receipt?.photoID).map { importer.exists($0) } ?? false
+          let uncertain = record.state == .importing && (record.asset.isMotionJPEG || record.asset.isVideo)
+          if hasReceipt || uncertain {
+            return PreparedQueueItem(key: record.id, original: nil, skip: false)
+          }
+          let original = try await self.prepareOriginal(record, importer: importer, cache: cache,
+            sourceAvailable: present.contains(record.id))
+          if original == nil { self.finishQueueItem(record.id) }
+          return PreparedQueueItem(key: record.id, original: original, skip: original == nil)
+        } catch is CancellationError { throw CancellationError() }
+        catch {
+          try self.recordFailure(error, for: record) { self.finishQueueItem(record.id) }
+          return PreparedQueueItem(key: record.id, original: nil, skip: true)
+        }
+      }, consume: { item in
+        try Task.checkCancellation()
+        guard self.fatal == nil else { throw SyncFailure(self.fatal!) }
+        guard let record = self.ledger.records[item.key] else { throw SyncFailure("导入任务记录缺失") }
+        if !item.skip {
+          self.status = "正在处理：\(record.asset.filename)"
+          if isRange { self.rangeStatus = self.status }
+          do {
+            // A consumer must never start a network request alongside the producer.
+            try await self.process(record, importer: importer, cache: cache,
+              sourceAvailable: nil, prepared: item.original)
+          } catch is CancellationError { throw CancellationError() }
+          catch {
+            try self.recordFailure(error, for: record) { self.finishQueueItem(record.id) }
+          }
+        }
+        self.finishQueueItem(item.key)
+      })
+  }
+  private func finishQueueItem(_ key: String) {
+    if let state = ledger.records[key]?.state {
+      importProgress?.finish(key: key, state: state)
+      completed = importProgress?.processed ?? 0
+    }
+  }
+  private func prepareOriginal(
+    _ input: SyncRecord, importer: PhotoImporter, cache: URL, sourceAvailable: Bool?
+  ) async throws -> ValidatedOriginal? {
+    var r = input
+    let file = cache.appendingPathComponent(
+      r.id + "." + (r.asset.filename as NSString).pathExtension.lowercased())
+    var hash: String?
+    if FileManager.default.fileExists(atPath: file.path) {
+      do { hash = try await importer.validate(file, asset: r.asset) }
+      catch is CancellationError { throw CancellationError() } catch {}
+    }
+    if hash == nil {
+      guard sourceAvailable == true else {
+        // nil means local recovery has not checked the remote inventory yet.
+        r.deferMissingOriginal(sourceIsAbsent: sourceAvailable == false)
+        try save(r)
+        return nil
+      }
+      r.state = .downloading
+      try save(r)
+      let part = cache.appendingPathComponent(r.id + ".part." + (r.asset.filename as NSString).pathExtension.lowercased())
+      _ = try await web.download(r.asset, to: part)
+      try Task.checkCancellation()
+      hash = try await importer.validate(part, asset: r.asset)
+      if FileManager.default.fileExists(atPath: file.path) {
+        try FileManager.default.removeItem(at: file)
+      }
+      try FileManager.default.moveItem(at: part, to: file)
+    }
+    r.sha256 = hash
+    r.state = .downloaded
+    try save(r)
+    guard let hash else { throw SyncFailure("无法计算文件校验值") }
+    try Task.checkCancellation()
+    return ValidatedOriginal(file: file, hash: hash)
   }
   private func process(
-    _ input: SyncRecord, importer: PhotoImporter, cache: URL, sourceAvailable: Bool?
+    _ input: SyncRecord, importer: PhotoImporter, cache: URL, sourceAvailable: Bool?,
+    prepared: ValidatedOriginal? = nil
   ) async throws {
     var r = input
     // Reconcile the local identifier from either ledger or pre-commit journal.
@@ -529,35 +649,12 @@ import SyncCore
       }
       throw SyncFailure("上次视频导入结果尚未确认，保留回执并暂停重复导入；重试会先核对图库")
     }
-    let file = cache.appendingPathComponent(
-      r.id + "." + (r.asset.filename as NSString).pathExtension.lowercased())
-    var hash: String?
-    if FileManager.default.fileExists(atPath: file.path) {
-      do { hash = try await importer.validate(file, asset: r.asset) }
-      catch is CancellationError { throw CancellationError() } catch {}
-    }
-    if hash == nil {
-      guard sourceAvailable == true else {
-        // nil means local recovery has not checked the remote inventory yet.
-        r.deferMissingOriginal(sourceIsAbsent: sourceAvailable == false)
-        try save(r)
-        return
-      }
-      r.state = .downloading
-      try save(r)
-      let part = cache.appendingPathComponent(r.id + ".part." + (r.asset.filename as NSString).pathExtension.lowercased())
-      _ = try await web.download(r.asset, to: part)
-      try Task.checkCancellation()
-      hash = try await importer.validate(part, asset: r.asset)
-      if FileManager.default.fileExists(atPath: file.path) {
-        try FileManager.default.removeItem(at: file)
-      }
-      try FileManager.default.moveItem(at: part, to: file)
-    }
-    r.sha256 = hash
-    r.state = .downloaded
-    try save(r)
-    guard let hash else { throw SyncFailure("无法计算文件校验值") }
+    let original: ValidatedOriginal?
+    if let prepared { original = prepared }
+    else { original = try await prepareOriginal(r, importer: importer, cache: cache, sourceAvailable: sourceAvailable) }
+    guard let original else { return }
+    r = ledger.records[r.id] ?? r
+    let file = original.file, hash = original.hash
     try Task.checkCancellation()
     if r.asset.isMotionJPEG {
       status = "正在转换实况照片：\(r.asset.filename)"

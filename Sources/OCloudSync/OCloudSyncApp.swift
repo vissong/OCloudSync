@@ -56,7 +56,7 @@ struct Dashboard: View {
           Label("自动同步新增照片与视频", systemImage: "sparkles")
           Text("关闭窗口后继续运行\n退出 App 后停止同步").font(.caption).foregroundStyle(.secondary)
         }
-        Text("本地版本 0.6.2").font(.caption2).foregroundStyle(.tertiary)
+        Text("本地版本 0.7.0").font(.caption2).foregroundStyle(.tertiary)
       }.padding(24).frame(width: 185).background(Color(nsColor: .controlBackgroundColor))
       Divider()
       VStack(alignment: .leading, spacing: 20) {
@@ -143,9 +143,14 @@ struct Dashboard: View {
             if let check = model.ledger.lastCheck {
               Text(check.label).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
-            if model.busy && model.total > 0 {
+            if let progress = model.localRecoveryProgress {
+              ImportProgressView(progress: progress, label: "本地恢复")
+            }
+            if let progress = model.importProgress {
+              ImportProgressView(progress: progress)
+            } else if model.busy && model.total > 0 {
               ProgressView(value: Double(model.completed), total: Double(model.total))
-              Text("\(model.completed) / \(model.total)").font(.caption.monospacedDigit())
+              Text("正在检查 \(model.completed) / \(model.total)").font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
             }
             HStack {

@@ -41,6 +41,9 @@ struct RangeImportView: View {
         Text(model.rangeStatus).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
       }
       if let progress = model.downloadProgress { DownloadProgressView(progress: progress) }
+      if model.importProgressIsRange, let progress = model.importProgress {
+        ImportProgressView(progress: progress)
+      }
       if let preview = model.rangePreview {
         previewContent(preview)
       } else {

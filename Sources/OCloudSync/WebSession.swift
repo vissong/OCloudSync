@@ -194,7 +194,12 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
     needsRescan = false
     return result
   }
+  private var lastDownloadStarted: ContinuousClock.Instant?
   func download(_ asset: RemoteAsset, to url: URL) async throws -> URL {
+    // Pace request starts rather than adding idle time after conversion and import.
+    if let lastDownloadStarted {
+      try await ContinuousClock().sleep(until: lastDownloadStarted.advanced(by: .milliseconds(1200)))
+    }
     if requiresLogin || isLoginPage { throw SessionAccessFailure(.loginRequired) }
     guard session.state == .active else { throw SessionAccessFailure(session.state) }
     // Never reload here: a new page needs a fresh scan and bridge before using asset metadata.
@@ -203,6 +208,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
     try Task.checkCancellation()
     let json = String(data: try JSONEncoder().encode(asset), encoding: .utf8)!
     let id = try gate.begin()
+    lastDownloadStarted = ContinuousClock.now
     downloadProgress.begin(token: id, filename: asset.filename, totalBytes: asset.bytes)
     destination = url
     expectedFileID = asset.fileID

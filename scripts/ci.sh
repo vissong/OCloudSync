@@ -19,6 +19,7 @@ python3 "$PROJECT_DIR/scripts/test-list-wait.py"
 python3 "$PROJECT_DIR/scripts/test-video-import.py"
 python3 "$PROJECT_DIR/scripts/test-date-repair.py"
 python3 "$PROJECT_DIR/scripts/test-range-import.py"
+python3 "$PROJECT_DIR/scripts/test-import-pipeline.py"
 
 OCLOUD_BUILD_DIR="$BUILD_DIR" OCLOUD_OUTPUT_DIR="$OUTPUT_DIR" \
   bash "$PROJECT_DIR/scripts/build-app.sh"
