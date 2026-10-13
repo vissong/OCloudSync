@@ -25,7 +25,7 @@ for frame in 0..<30 {
     if frame == 0 {
         let image = context.makeImage()!
         let destination = CGImageDestinationCreateWithURL(root.appendingPathComponent("still.jpg") as CFURL, UTType.jpeg.identifier as CFString, 1, nil)!
-        CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: 6, kCGImagePropertyExifDictionary: [kCGImagePropertyExifDateTimeOriginal: "2030:01:02 03:04:05"], kCGImagePropertyGPSDictionary: [kCGImagePropertyGPSLatitude: 1.25, kCGImagePropertyGPSLatitudeRef: "N", kCGImagePropertyGPSLongitude: 2.5, kCGImagePropertyGPSLongitudeRef: "E"]] as CFDictionary)
+        CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: 6, kCGImagePropertyExifDictionary: [kCGImagePropertyExifDateTimeOriginal: "2030:01:02 03:04:05"], kCGImagePropertyGPSDictionary: [kCGImagePropertyGPSLatitude: 1.234567, kCGImagePropertyGPSLatitudeRef: "N", kCGImagePropertyGPSLongitude: 2.345678, kCGImagePropertyGPSLongitudeRef: "E"]] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { fatalError("JPEG failed") }
     }
     CVPixelBufferUnlockBaseAddress(pixels, [])
