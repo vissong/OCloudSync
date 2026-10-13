@@ -18,6 +18,8 @@ import SyncCore
   @Published var rangeSelected = Set<String>()
   @Published var rangePageOpen = false
   @Published var rangeImporting = false
+  @Published var datePreview: PhotoDatePreview?
+  @Published var dateStatus = "检查本 App 已导入项目的拍摄时间，再原位修复差异。"
   let web = WebSession()
   private var store: LedgerStore?
   private var importer: PhotoImporter?
@@ -276,6 +278,49 @@ import SyncCore
     work?.cancel()
     clearRangePreview()
   }
+  func checkDates() {
+    guard !busy, fatal == nil, let importer, let cache else { return }
+    busy = true
+    datePreview = nil
+    let records = ledger.records.values.filter { $0.state == .imported }.sorted { $0.id < $1.id }
+    work = Task {
+      defer { busy = false; work = nil }
+      do {
+        datePreview = try await importer.previewDates(records, cache: cache) { n, t in
+          await MainActor.run { self.dateStatus = "正在核对图库日期：\(n) / \(t)…" }
+        }
+        guard let preview = datePreview else { return }
+        dateStatus = "已检查 \(preview.checked) 项：\(preview.correct) 项日期正确，\(preview.items.count) 项待修复（视频 \(preview.items.filter(\.isVideo).count) 项），\(preview.skipped) 项因回执、日期来源或后续编辑而跳过。"
+      } catch { dateStatus = error.localizedDescription }
+    }
+  }
+  func repairDates() {
+    guard !busy, fatal == nil, let importer, let preview = datePreview, !preview.items.isEmpty else { return }
+    busy = true
+    datePreview = nil
+    work = Task {
+      defer { busy = false; work = nil }
+      var repaired = 0
+      do {
+        _ = try importer.saveDateAudit(preview)
+        for item in preview.items {
+          try Task.checkCancellation()
+          guard let record = ledger.records[item.key] else { throw SyncFailure("原导入记录缺失，请重新检查") }
+          dateStatus = "正在修复拍摄时间：\(repaired + 1) / \(preview.items.count)…"
+          try await importer.repairDate(item, record: record)
+          if record.error != nil {
+            var repairedRecord = record
+            repairedRecord.error = nil
+            try save(repairedRecord)
+          }
+          repaired += 1
+        }
+        dateStatus = "已原位修复 \(repaired) 项拍摄时间。原文件和图库标识保持不变，iCloud 更新由系统照片管理。"
+      } catch {
+        dateStatus = "已修复 \(repaired) 项，其余未完成：\(error.localizedDescription)。重新检查后可继续。"
+      }
+    }
+  }
   var syncHeadline: String {
     if !enabled { return "自动同步已停止" }
     switch session.state {
@@ -399,6 +444,16 @@ import SyncCore
   }
   private func recordFailure(_ error: Error, for record: SyncRecord) throws {
     if fatal != nil { throw error }
+    // The resources are already committed and verified; only their date needs repair.
+    if let dateFailure = error as? DateVerificationPending {
+      var committed = ledger.records[record.id] ?? record
+      committed.photoID = dateFailure.photoID
+      committed.state = .imported
+      committed.nextAttempt = nil
+      committed.error = dateFailure.localizedDescription
+      try save(committed)
+      return
+    }
     // Preserve a confirmed non-commit even if login expiration or cancellation happens concurrently.
     if error is ConfirmedImportFailure {
       var failed = ledger.records[record.id] ?? record
@@ -436,6 +491,9 @@ import SyncCore
         }
         try await importer.verifyOriginalVideo(id, hash: hash)
         r.sha256 = hash
+      }
+      if let date = receipt?.mediaDate, receipt?.dateVerified != true {
+        try importer.confirmImportedDate(r.id, id: id, expected: date.date)
       }
       r.photoID = id
       r.state = .imported

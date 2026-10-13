@@ -56,7 +56,7 @@ struct Dashboard: View {
           Label("自动同步新增照片与视频", systemImage: "sparkles")
           Text("关闭窗口后继续运行\n退出 App 后停止同步").font(.caption).foregroundStyle(.secondary)
         }
-        Text("本地版本 0.5.1").font(.caption2).foregroundStyle(.tertiary)
+        Text("本地版本 0.6.0").font(.caption2).foregroundStyle(.tertiary)
       }.padding(24).frame(width: 185).background(Color(nsColor: .controlBackgroundColor))
       Divider()
       VStack(alignment: .leading, spacing: 20) {
@@ -90,6 +90,26 @@ struct Dashboard: View {
               model.busy || checkFilename.isEmpty || model.fatal != nil)
           }
           Text(model.status).font(.caption).foregroundStyle(.secondary)
+          VStack(alignment: .leading, spacing: 8) {
+            HStack {
+              Button("检查拍摄时间") { model.checkDates() }.disabled(model.busy || model.fatal != nil)
+              if let preview = model.datePreview, !preview.items.isEmpty {
+                Button("修复 \(preview.items.count) 项日期") { model.repairDates() }
+                  .disabled(model.busy || model.fatal != nil)
+              }
+            }
+            Text(model.dateStatus).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            if let preview = model.datePreview, !preview.items.isEmpty {
+              ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                  ForEach(preview.items) { item in
+                    Text("\(item.filename)：\(item.before?.formatted() ?? "无日期") → \(item.target.date.formatted())")
+                      .font(.caption).textSelection(.enabled)
+                  }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+              }.frame(maxHeight: 100)
+            }
+          }
           records
         } else {
           HStack {
