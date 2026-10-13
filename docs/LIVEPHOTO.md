@@ -13,7 +13,11 @@
 
 派生缓存位于 Application Support/OCloudSync/originals/livephotos/ 下，以源 SHA-256 隔离，目录含 live.heic、live.mov、manifest.json。完整缓存复用前再次校验。取消或 180 秒超时后由主 App 等待 worker 退出再删除该次临时目录。原始复合 JPEG 和正式缓存不自动清理。
 
-HEIC/H.264 重新编码不属于字节级无损转换；原文件始终保留。ImageIO 的 HEIC 编码器省略 GPS ProcessingMethod 定位方式标签；其余源 GPS 字段精确比较。厂商私有元数据不保证保留。没有 XMP 封面时间或其值为 -1 时采用视频中点并记录 usedFallbackTime；无效值、冲突值或越界时报错。
+HEIC/H.264 重新编码不属于字节级无损转换；原文件始终保留。ImageIO 的 HEIC 编码器省略 GPS ProcessingMethod 定位方式标签；0.5.1 起，经纬度允许最多 2e-6 度的编码舍入差异（单轴约 0.23 米以内），须为有效有限数值且不超出经纬度范围，方向、海拔、日期等其余源 GPS 字段仍精确比较。缺失或超限继续中止导入，错误仅指出字段、不输出实际位置。厂商私有元数据不保证保留。没有 XMP 封面时间或其值为 -1 时采用视频中点并记录 usedFallbackTime；无效值、冲突值或越界时报错。
+
+### 0.5.1 舍入回归验证
+
+新增 4 项单测覆盖微小正负舍入、超限坐标变化、GPS 缺失、方向／海拔／日期变化及非法数值；合成 JPEG 使用高精度 EXIF 有理数模拟相机元数据。旧转换器拒绝合成样本，修复后 61 项 Swift 测试和完整 CI（含 Apple Live Photo 配对、缓存复用与损坏恢复）通过。本机 46 个同类失败缓存样本全部重新转换并通过 Apple Live Photo 构造验证；该转换验证仅写入独立测试目录，不写入系统图库。
 
 ## 验证
 
