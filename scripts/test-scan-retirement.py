@@ -22,7 +22,16 @@ navigation = "\n".join(extract(signature) for signature in [
 ])
 harness = r'''
 import Foundation
-final class WKWebView { let url = URL(string: "https://cloud.oppo.com/module.html") }
+final class WKWebView {
+  let url = URL(string: "https://cloud.oppo.com/module.html")
+  var bridgeRetirements = 0
+  var released = false
+  func evaluateJavaScript(_ script: String, completionHandler: ((Any?, Error?) -> Void)?) {
+    precondition(["window.OCloudBridge?.retire(true)", "window.OCloudBridge?.retire(false)"].contains(script))
+    released = script.contains("true")
+    bridgeRetirements += 1
+  }
+}
 final class WKNavigation {}
 struct Ledger {}
 struct ScanPage {}
@@ -92,6 +101,7 @@ __NAVIGATION__
         print("FAIL: failed scan page can accept a late response on the next scan: \(outcome)")
         exit(1)
       }
+      precondition(spy.webView.bridgeRetirements == 1 && !spy.webView.released)
       // A renewal cannot make the abandoned document usable before it reloads.
       guard spy.session.begin(at: Date().addingTimeInterval(360)) == nil else {
         fatalError("abandoned page renewed without reloading")
@@ -103,9 +113,11 @@ __NAVIGATION__
       guard spy.retired == (outcome == .navigated ? 1 : 0), !spy.session.needsPageReload else {
         fatalError("old scan retired a new document or replaced login-required state")
       }
+      precondition(spy.webView.bridgeRetirements == (outcome == .navigated ? 0 : 1))
     }
     let success = SessionSpy(.success)
     _ = try await success.scan(progress: { _, _ in })
+    precondition(success.webView.bridgeRetirements == 1 && success.webView.released, "successful scan must release request interception")
     guard success.retired == 0, !success.session.needsPageReload, !success.needsRescan else {
       fatalError("successful scan retired the usable page")
     }

@@ -127,11 +127,24 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
     throw SessionAccessFailure(.retrying)
   }
   func wait(after serial: Int) async throws -> ScanPage {
+    struct RequestState: Decodable { let kind: String; let code: Int?; let retries: Int }
     for _ in 0..<90 {
       try Task.checkCancellation()
       if let page = try await evaluate(
         "window.OCloudBridge.read(\(serial))", as: ScanPage?.self)
       { return page }
+      if let state = try await evaluate(
+        "window.OCloudBridge.requestState(\(serial))", as: RequestState?.self) {
+        if state.kind == "loginRequired" {
+          resetSession(loginRequired: true)
+          throw SessionAccessFailure(.loginRequired)
+        }
+        if state.kind == "failed" {
+          let code = state.code.map { "接口状态 \($0)" } ?? "网络或响应异常"
+          let retried = state.retries > 0 ? "，已重试 \(state.retries) 次" : ""
+          throw SyncFailure("OPPO 清单读取失败（\(code)\(retried)），本次未读取完整；请稍后重试")
+        }
+      }
       try await Task.sleep(nanoseconds: 500_000_000)
     }
     throw SyncFailure("OPPO 列表请求超时，本次不提交基线；稍后可重试")
@@ -145,6 +158,10 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
     let document = documentGeneration
     var completed = false
     defer {
+      // Successful scans release interception; failed scans block late signing callbacks.
+      if documentGeneration == document {
+        webView.evaluateJavaScript("window.OCloudBridge?.retire(\(completed))", completionHandler: nil)
+      }
       // Retire late page callbacks after interruption, including wake-up without navigation.
       // A newer document or an already scheduled recovery must keep its own session state.
       if !completed, documentGeneration == document, !requiresLogin, !session.needsPageReload {
