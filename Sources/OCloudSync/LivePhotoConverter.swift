@@ -39,7 +39,7 @@ enum LivePhotoConverter {
     guard process.terminationStatus == 0 else {
       let message =
         (try? String(contentsOf: errorURL))?.split(separator: "\n").last.map(String.init) ?? "转换失败"
-      throw SyncFailure("实况转换失败，未导入静态图：" + String(message.prefix(400)))
+      throw SyncFailure("实况转换失败：" + String(message.prefix(400)))
     }
     let manifest = try JSONDecoder().decode(
       LivePhotoManifest.self,

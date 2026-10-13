@@ -22,6 +22,7 @@ final class PhotoImporter {
     var dateVerified: Bool?
     var pendingDate: ResolvedMediaDate?
     var dateBeforeRepair: Date?
+    var staticFallback: StaticFallbackInfo?
   }
   let journalDirectory: URL
   init(directory: URL) throws {
@@ -107,6 +108,40 @@ final class PhotoImporter {
     }
     return nil
   }
+  /// User-selected duplicate policy; metadata access does not download iCloud originals.
+  func findExistingByNameAndDate(asset: RemoteAsset, file: URL) throws -> String? {
+    try Task.checkCancellation()
+    try checkPermission()
+    let date = try MediaDateResolver.resolve(asset: asset,file: file).date
+    let second = Date(timeIntervalSince1970: floor(date.timeIntervalSince1970))
+    let options = lookupOptions()
+    options.predicate = NSPredicate(format: "mediaType == %d AND creationDate >= %@ AND creationDate < %@",
+      (asset.isVideo ? PHAssetMediaType.video : .image).rawValue,
+      second as NSDate,second.addingTimeInterval(1) as NSDate)
+    let candidates = PHAsset.fetchAssets(with: options)
+    var identifier: String?
+    candidates.enumerateObjects { candidate, _, stop in
+      if Task.isCancelled { stop.pointee = true; return }
+      let matched = PHAssetResource.assetResources(for: candidate).contains { resource in
+        resource.type == (asset.isVideo ? .video : .photo)
+          && FilenameDateMatch.matches(asset: asset,date: date,filename: resource.originalFilename,
+            creationDate: candidate.creationDate,isVideo: candidate.mediaType == .video,
+            isLivePhoto: candidate.mediaSubtypes.contains(.photoLive))
+      }
+      if matched { identifier = candidate.localIdentifier; stop.pointee = true }
+    }
+    try Task.checkCancellation()
+    return identifier
+  }
+  func verifyStaticAsset(_ id: String, hash: String) async throws {
+    try checkPermission()
+    guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id],options: lookupOptions()).firstObject,
+      asset.mediaType == .image, !asset.mediaSubtypes.contains(.photoLive),
+      let photo = PHAssetResource.assetResources(for: asset).first(where: { $0.type == .photo }),
+      try await resourceHash(photo) == hash else {
+      throw SyncFailure("静态回退的图库原片尚未确认，保留回执等待核对")
+    }
+  }
   func importLive(_ pair: PreparedLivePhoto, asset: RemoteAsset) async throws -> String {
     let manifest = pair.manifest
     let mediaDate: ResolvedMediaDate
@@ -183,7 +218,8 @@ final class PhotoImporter {
         try await operation.read(resource)
       }, onCancel: { operation.cancel(CancellationError()) })
   }
-  func importFile(_ file: URL, asset: RemoteAsset, hash: String) async throws -> String {
+  func importFile(_ file: URL, asset: RemoteAsset, hash: String,
+    staticFallback: StaticFallbackInfo? = nil) async throws -> String {
     let mediaDate: ResolvedMediaDate
     do {
       try Task.checkCancellation()
@@ -209,7 +245,8 @@ final class PhotoImporter {
         identifier = request.placeholderForCreatedAsset?.localIdentifier
         if let id = identifier {
           do {
-            try JSONEncoder().encode(Receipt(photoID: id, sourceHash: hash, mediaDate: mediaDate)).write(to: journal, options: .atomic)
+            try JSONEncoder().encode(Receipt(photoID: id, sourceHash: staticFallback?.sourceHash ?? hash,
+              mediaDate: mediaDate,staticFallback: staticFallback)).write(to: journal, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: journal.path)
           } catch { journalError = error }
         }

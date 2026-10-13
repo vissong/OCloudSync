@@ -90,7 +90,8 @@ final class MotionTests: XCTestCase {
     XCTAssertThrowsError(try StillMetadata.validateGPS(source, nil))
   }
   func testWorkerCancellationAndTimeoutRemoveStageAfterExit() async throws {
-    for cancel in [true, false] {
+    // Repeat both stop paths: termination delivery can race task resumption on another thread.
+    for cancel in [true, false, true, false, true, false] {
       let stage = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
       try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: false)
       try Data([1, 2]).write(to: stage.appendingPathComponent("motion.mp4"))

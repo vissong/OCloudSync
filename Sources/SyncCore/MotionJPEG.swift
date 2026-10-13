@@ -89,7 +89,7 @@ public enum MotionJPEG {
       cursor = range.upperBound
     }
     guard candidates.count == 1, let offset = candidates.first else {
-      throw SyncFailure("未找到唯一完整的实况 MP4 视频；不会降级导入静态照片")
+      throw SyncFailure("未找到唯一完整的实况 MP4 视频")
     }
     return Payload(
       videoOffset: offset,

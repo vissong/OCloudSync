@@ -81,7 +81,7 @@ struct RangeImportView: View {
         Button("取消全选") { model.rangeSelected = [] }
         Spacer()
         Text("已选 \(selected.count) 项 · \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))")
-        Button("导入选中的 \(selected.count) 项") { model.importRange() }
+        Button("加入队列并导入 \(selected.count) 项") { model.importRange() }
           .buttonStyle(.borderedProminent).disabled(selected.isEmpty)
       }.disabled(model.busy)
       List(preview.items, id: \.key) { asset in

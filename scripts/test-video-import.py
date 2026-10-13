@@ -23,6 +23,7 @@ struct RemoteAsset {
   static func hashFile(_ file: URL) throws -> String { "hash" }
 }
 struct ResolvedMediaDate: Codable { let date: Date }
+struct StaticFallbackInfo: Codable { let sourceHash: String; let stillHash: String; let reason: String }
 enum MediaDateResolver {
   static let expected = Date(timeIntervalSince1970: 1_780_000_000)
   static func resolve(asset: RemoteAsset, file: URL) throws -> ResolvedMediaDate { ResolvedMediaDate(date: expected) }
@@ -119,6 +120,15 @@ __METHOD__
     precondition(PHAssetCreationRequest.dates.count == 5, "Live Photo capture date missing")
     let liveReceipt = try JSONDecoder().decode(ImportSpy.Receipt.self, from: Data(contentsOf: root.appendingPathComponent("live.json")))
     precondition(liveReceipt.mediaDate?.date == MediaDateResolver.expected)
+    let fallback = StaticFallbackInfo(sourceHash: "motion-original",stillHash: "hash",reason: "conversion failed")
+    _ = try await spy.importFile(file, asset: RemoteAsset(key: "fallback",filename: "motion.jpg",isVideo: false),
+      hash: "hash",staticFallback: fallback)
+    let staticReceipt = try JSONDecoder().decode(ImportSpy.Receipt.self,from: Data(contentsOf: root.appendingPathComponent("fallback.json")))
+    precondition(staticReceipt.sourceHash == "motion-original" && staticReceipt.staticFallback?.stillHash == "hash")
+    precondition(staticReceipt.livePhoto == nil && staticReceipt.dateVerified == true)
+    precondition(staticReceipt.mediaDate?.date == MediaDateResolver.expected)
+    precondition(PHAssetCreationRequest.resources.last == .photo && PHAssetCreationRequest.filename == "motion.jpg")
+    precondition(PHAssetCreationRequest.dates.count == 6)
     spy.dateFails = true
     let pending = RemoteAsset(key: "date-pending", filename: "pending.mp4", isVideo: true)
     do { _ = try await spy.importFile(file, asset: pending, hash: "hash"); fatalError("date mismatch ignored") }

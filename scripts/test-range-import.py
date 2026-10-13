@@ -36,6 +36,8 @@ import Foundation
 @MainActor final class Model {
   var ledger = Ledger(), busy = false, fatal: String?, rangePreview: DateRangePreview?
   var rangeStatus = "", rangeSelected = Set<String>(), rangePageOpen = true, rangeImporting = false
+  var showQueue = false
+  var queueBatchID: UUID?
   var work: Task<Void,Never>?, importer: Importer? = Importer(), cache: URL? = URL(fileURLWithPath:"/unused")
   var activeAccount: String?, completed = 0, total = 0, status = "", intervalMinutes = 15
   var importProgress: ImportProgress?
@@ -49,6 +51,8 @@ import Foundation
   func stopForStorage(_ error: Error) { fatal="storage" }
   func process(_ record: SyncRecord, importer: Importer, cache: URL, sourceAvailable: Bool?) async throws {
     precondition(sourceAvailable == true)
+    precondition(ledger.importBatches?.last?.recordKeys.contains(record.id) == true)
+    precondition(!rangeImporting || showQueue)
     processed.append(record.id)
     var r = record
     if failSession { r.state = .downloading; ledger.records[r.id]=r; throw SessionAccessFailure(.loginRequired) }
@@ -97,11 +101,14 @@ __METHODS__
    precondition(model.ledger.records[pending.key]?.state == .pending)
    precondition(model.ledger.accounts == before.accounts && !model.rangeImporting && !model.busy)
    precondition(model.rangePreview == nil)
+   precondition(model.queueBatchID == model.ledger.importBatches?.last?.id)
+   precondition(model.ledger.importBatches?.last?.recordKeys == [a.key])
    // A mid-download session failure must make the selected work recoverable.
    model.ledger=before; model.processed=[]; model.failSession=true
    model.previewRange(start:capture,end:capture,photos:true,videos:true); await model.work?.value
    model.rangeSelected=[a.key]; model.importRange(); await model.work?.value
    precondition(model.ledger.records[a.key]?.state == .pending && model.processed == [a.key])
+   precondition(model.status == SessionState.loginRequired.label, "queue hid session pause reason")
    // Permission/cancelled scan never queue historical files.
    model.ledger=before; model.processed=[]; model.failSession=false
    model.previewRange(start:capture,end:capture,photos:true,videos:true); await model.work?.value

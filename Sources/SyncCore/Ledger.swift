@@ -99,7 +99,15 @@ public struct SyncRecord: Codable, Identifiable, Sendable {
   public var sha256: String?
   public var photoID: String?
   public var livePhoto: LivePhotoManifest?
+  public var staticFallback: StaticFallbackInfo?
+  public var duplicateReason: String?
   public var updatedAt = Date()
+  public var resultLabel: String {
+    if state == .imported && staticFallback != nil { return "已按静态照片导入" }
+    if state == .imported && livePhoto != nil { return "Live Photo 已导入" }
+    if state == .unsupported && asset.isMotion { return "此实况格式暂不支持" }
+    return state.label
+  }
   public init(asset: RemoteAsset, state: RecordState) {
     self.asset = asset
     self.state = state
@@ -131,6 +139,8 @@ public struct Ledger: Codable {
   public var scanCheckpoints: [String: ScanCheckpoint]?
   public var lastCheck: ScanSummary?
   public var videoBaselineAccounts: Set<String>?
+  public var importBatches: [ImportBatch]?
+  public var staticFallbackPolicyVersion: Int?
   public init() {}
   public mutating func applyScan(_ result: ScanResult) throws {
     if result.complete {
@@ -161,6 +171,7 @@ public struct Ledger: Codable {
         $0.account == account && !$0.remoteID.isEmpty && !$0.fileID.isEmpty && $0.bytes > 0
       })
     else { throw SyncFailure("云相册身份或文件信息不完整，未提交扫描") }
+    migrateImportQueue()
     let baseline = !accounts.contains(account)
     let videoBaseline = videoBaselineAccounts?.contains(account) != true
     if videoBaseline {
@@ -172,9 +183,15 @@ public struct Ledger: Codable {
         records[key]?.error = nil
       }
     }
+    var newKeys = [String]()
     for a in assets where records[a.key] == nil {
       records[a.key] = SyncRecord(
         asset: a, state: baseline || (videoBaseline && a.isVideo) ? .baseline : (a.supported ? .pending : .unsupported))
+      if records[a.key]?.state == .pending { newKeys.append(a.key) }
+    }
+    if !newKeys.isEmpty {
+      if importBatches == nil { importBatches = [] }
+      importBatches?.append(ImportBatch(source: .automatic,keys: newKeys))
     }
     for a in assets where records[a.key]?.state == .unavailable {
       records[a.key]?.state = a.supported ? .pending : .unsupported
@@ -206,6 +223,18 @@ public struct Ledger: Codable {
       records[key]?.state = .pending
       records[key]?.error = nil
     }
+  }
+  /// Only retry known pre-commit conversion failures; never reset an uncertain Photos transaction.
+  public mutating func migrateStaticFallback() {
+    guard staticFallbackPolicyVersion == nil else { return }
+    for key in Array(records.keys) {
+      guard var record = records[key], record.state == .failed, record.asset.isMotionJPEG,
+        record.photoID == nil, record.error?.hasPrefix("实况转换") == true else { continue }
+      record.state = .pending; record.attempts = 0; record.nextAttempt = nil
+      record.error = nil
+      records[key] = record
+    }
+    staticFallbackPolicyVersion = 1
   }
   public mutating func retryFailures() {
     for key in Array(records.keys)

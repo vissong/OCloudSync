@@ -25,7 +25,13 @@ public enum ConversionWorker {
       }
       if process.isRunning { kill(process.processIdentifier, SIGKILL) }
       // Never release the serial conversion slot or remove files while the child writes.
-      process.waitUntilExit()
+      // Avoid Foundation's blocking, run-loop-based wait on a cooperative executor.
+      // Yield until Foundation has observed termination before releasing the helper's files.
+      while process.isRunning {
+        await withCheckedContinuation { continuation in
+          DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { continuation.resume() }
+        }
+      }
       throw error
     }
   }

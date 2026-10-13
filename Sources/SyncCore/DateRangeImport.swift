@@ -1,6 +1,6 @@
 import Foundation
 
-public struct ImportDateRange: Equatable, Sendable {
+public struct ImportDateRange: Codable, Equatable, Sendable {
   public let start: Date
   public let endExclusive: Date
   public let timeZoneIdentifier: String
@@ -103,6 +103,9 @@ extension Ledger {
       record.updatedAt = now
       records[asset.key] = record
     }
-    return selected.map(\.key)
+    let keys = selected.map(\.key)
+    if importBatches == nil { importBatches = [] }
+    importBatches?.append(ImportBatch(source: .dateRange,keys: keys,range: preview.range,createdAt: now))
+    return keys
   }
 }

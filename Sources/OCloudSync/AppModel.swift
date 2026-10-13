@@ -22,6 +22,9 @@ import SyncCore
   @Published var rangeSelected = Set<String>()
   @Published var rangePageOpen = false
   @Published var rangeImporting = false
+  @Published var showQueue = false
+  @Published var queueBatchID: UUID?
+  @Published var processingKey: String?
   @Published var datePreview: PhotoDatePreview?
   @Published var dateStatus = "检查本 App 已导入项目的拍摄时间，再原位修复差异。"
   let web = WebSession()
@@ -43,6 +46,8 @@ import SyncCore
       ledger = try s.load()
       if !ledger.records.isEmpty { status = "历史基线与导入记录已恢复，等待检查" }
       ledger.recoverInterrupted()
+      ledger.migrateStaticFallback()
+      ledger.migrateImportQueue()
       try s.save(ledger)
       cache = root.appendingPathComponent("originals", isDirectory: true)
       try FileManager.default.createDirectory(
@@ -151,17 +156,21 @@ import SyncCore
         }
         try FileManager.default.moveItem(at: part, to: file)
         try Task.checkCancellation()
-        status = "下载已校验，正在检查图库中是否存在相同原片…"
-        let id: String?
+        status = "下载已校验，正在按文件名与拍摄时间检查图库…"
+        let id = try importer.findExistingByNameAndDate(asset: a,file: file)
         var liveManifest: LivePhotoManifest?
-        if a.isMotionJPEG {
+        var staticFallback: StaticFallbackInfo?
+        if a.isMotionJPEG && id == nil {
           status = "正在转换并校验 Live Photo 配对…"
-          let pair = try await LivePhotoConverter.prepare(file, asset: a, hash: hash)
-          liveManifest = pair.manifest
-          id = try await importer.findExistingLive(filename: a.filename, manifest: pair.manifest)
-        } else {
-          id = try await importer.findExisting(
-            asset: a, hash: hash)
+          do {
+            let pair = try await LivePhotoConverter.prepare(file, asset: a, hash: hash)
+            liveManifest = pair.manifest
+          } catch is CancellationError { throw CancellationError() }
+          catch {
+            try Task.checkCancellation()
+            staticFallback = try await StaticPhotoFallback.prepare(file,asset: a,sourceHash: hash,
+              reason: error.localizedDescription).info
+          }
         }
         struct Check: Codable {
           let filename: String
@@ -170,16 +179,19 @@ import SyncCore
           let duplicateInPhotos: Bool
           let checkedAt: Date
           let livePhoto: LivePhotoManifest?
+          let staticFallback: StaticFallbackInfo?
         }
         if let store {
           try JSONEncoder().encode(
             Check(
               filename: a.filename, bytes: a.bytes, sha256: hash, duplicateInPhotos: id != nil,
-              checkedAt: Date(), livePhoto: liveManifest)
+              checkedAt: Date(), livePhoto: liveManifest,staticFallback: staticFallback)
           ).write(to: store.directory.appendingPathComponent("last-check.json"), options: .atomic)
         }
         status =
-          id != nil ? "检查通过：图库中已有相同原片／Live Photo 配对；没有再次导入" : "检查通过：原文件完整，实况配对已校验（如适用）；本次仅检查，未导入"
+          id != nil ? "检查通过：图库中已有同文件名、同拍摄时间的同类型文件；没有再次导入"
+            : staticFallback != nil ? "实况转换失败，但静态主图校验通过；本次仅检查，未导入"
+            : "检查通过：原文件完整，实况配对已校验（如适用）；本次仅检查，未导入"
       } catch is CancellationError { status = "检查已停止" } catch {
         status = error.localizedDescription
       }
@@ -244,7 +256,10 @@ import SyncCore
     completed = 0; total = 0
     rangeImporting = true
     work = Task {
-      defer { busy = false; rangeImporting = false; work = nil }
+      defer {
+        status = fatal ?? rangeStatus
+        busy = false; rangeImporting = false; work = nil
+      }
       do {
         guard let importer, let cache else { throw SyncFailure("本地缓存不可用") }
         try importer.checkPermission()
@@ -257,6 +272,8 @@ import SyncCore
         var changed = ledger
         let keys = try changed.queueRangeImport(preview, selectedKeys: selected, freshScan: scan)
         try persist(changed)
+        queueBatchID = changed.importBatches?.last?.id
+        showQueue = true
         clearRangePreview()
         activeAccount = scan.account
         // A manual range import must not drain unrelated automatic or historical tasks.
@@ -517,7 +534,7 @@ import SyncCore
         do {
           let receipt = try importer.receipt(for: record.id)
           let hasReceipt = (record.photoID ?? receipt?.photoID).map { importer.exists($0) } ?? false
-          let uncertain = record.state == .importing && (record.asset.isMotionJPEG || record.asset.isVideo)
+          let uncertain = record.state == .importing
           if hasReceipt || uncertain {
             return PreparedQueueItem(key: record.id, original: nil, skip: false)
           }
@@ -595,11 +612,18 @@ import SyncCore
     _ input: SyncRecord, importer: PhotoImporter, cache: URL, sourceAvailable: Bool?,
     prepared: ValidatedOriginal? = nil
   ) async throws {
+    processingKey = input.id
+    defer { processingKey = nil }
     var r = input
     // Reconcile the local identifier from either ledger or pre-commit journal.
     let receipt = try importer.receipt(for: r.id)
+    r.staticFallback = r.staticFallback ?? receipt?.staticFallback
     if let id = r.photoID ?? receipt?.photoID, importer.exists(id) {
-      if r.asset.isMotionJPEG {
+      if let fallback = r.staticFallback {
+        try await importer.verifyStaticAsset(id,hash: fallback.stillHash)
+        r.sha256 = fallback.sourceHash
+        r.livePhoto = nil
+      } else if r.asset.isMotionJPEG {
         guard let manifest = r.livePhoto ?? receipt?.livePhoto else {
           throw SyncFailure("缺少 Live Photo 配对回执，暂停重复导入")
         }
@@ -613,6 +637,12 @@ import SyncCore
         }
         try await importer.verifyOriginalVideo(id, hash: hash)
         r.sha256 = hash
+      } else if !r.asset.isMotionJPEG {
+        guard let hash = r.sha256 ?? receipt?.sourceHash else {
+          throw SyncFailure("缺少照片原文件校验回执，暂停重复导入")
+        }
+        try await importer.verifyStaticAsset(id,hash: hash)
+        r.sha256 = hash
       }
       if let date = receipt?.mediaDate, receipt?.dateVerified != true {
         try importer.confirmImportedDate(r.id, id: id, expected: date.date)
@@ -622,6 +652,16 @@ import SyncCore
       r.error = nil
       try save(r)
       return
+    }
+    if let fallback = r.staticFallback, r.state == .importing {
+      if let id = try await importer.findExisting(asset: r.asset,hash: fallback.stillHash) {
+        try await importer.verifyStaticAsset(id,hash: fallback.stillHash)
+        r.photoID = id; r.sha256 = fallback.sourceHash; r.state = .imported
+        r.livePhoto = nil; r.error = nil; r.nextAttempt = nil
+        try save(r)
+        return
+      }
+      throw SyncFailure("上次静态回退导入结果尚未确认，保留回执并暂停重复导入")
     }
     if r.asset.isMotionJPEG && r.state == .importing {
       if let manifest = r.livePhoto ?? receipt?.livePhoto,
@@ -649,72 +689,74 @@ import SyncCore
       }
       throw SyncFailure("上次视频导入结果尚未确认，保留回执并暂停重复导入；重试会先核对图库")
     }
+    if r.state == .importing {
+      if let hash = r.sha256 ?? receipt?.sourceHash,
+        let id = try await importer.findExisting(asset: r.asset,hash: hash) {
+        try await importer.verifyStaticAsset(id,hash: hash)
+        r.photoID = id; r.sha256 = hash; r.state = .imported
+        r.error = nil; r.nextAttempt = nil
+        try save(r)
+        return
+      }
+      throw SyncFailure("上次照片导入结果尚未确认，保留回执并暂停重复导入；重试会先核对图库")
+    }
     let original: ValidatedOriginal?
     if let prepared { original = prepared }
     else { original = try await prepareOriginal(r, importer: importer, cache: cache, sourceAvailable: sourceAvailable) }
     guard let original else { return }
+    let previousFallback = r.staticFallback
     r = ledger.records[r.id] ?? r
+    r.staticFallback = r.staticFallback ?? previousFallback
     let file = original.file, hash = original.hash
     try Task.checkCancellation()
-    if r.asset.isMotionJPEG {
-      status = "正在转换实况照片：\(r.asset.filename)"
-      let pair = try await LivePhotoConverter.prepare(file, asset: r.asset, hash: hash)
-      r.livePhoto = pair.manifest
+    if let id = try importer.findExistingByNameAndDate(asset: r.asset,file: file) {
+      r.photoID = id
+      r.state = .duplicate
+      r.duplicateReason = "图库中已有同文件名、同拍摄时间的\(r.asset.isVideo ? "视频" : "照片")"
+      r.error = nil; r.nextAttempt = nil
       try save(r)
-      for match in ledger.duplicates(hash: hash, excluding: r.id, account: r.asset.account) {
-        if let id = match.photoID, let manifest = match.livePhoto, importer.exists(id) {
-          try await importer.verifyLiveAsset(id, manifest: manifest)
-          r.photoID = id
-          r.livePhoto = manifest
-          r.state = .duplicate
-          r.error = nil
-          try save(r)
-          return
-        }
+      return
+    }
+    var fileToImport = file, assetToImport = r.asset, hashToImport = hash
+    if r.asset.isMotionJPEG && r.staticFallback == nil {
+      status = "正在转换实况照片：\(r.asset.filename)"
+      let pair: PreparedLivePhoto?
+      do { pair = try await LivePhotoConverter.prepare(file,asset: r.asset,hash: hash) }
+      catch is CancellationError { throw CancellationError() }
+      catch {
+        try Task.checkCancellation()
+        let fallback = try await StaticPhotoFallback.prepare(file,asset: r.asset,sourceHash: hash,
+          reason: error.localizedDescription)
+        r.staticFallback = fallback.info; r.livePhoto = nil
+        try save(r)
+        fileToImport = fallback.file; assetToImport = fallback.asset; hashToImport = fallback.info.stillHash
+        pair = nil
       }
-      if let id = try await importer.findExistingLive(
-        filename: r.asset.filename, manifest: pair.manifest)
-      {
-        r.photoID = id
-        r.state = .duplicate
+      if let pair {
+        r.livePhoto = pair.manifest
+        try save(r)
+        try Task.checkCancellation()
+        status = "正在将 Live Photo 配对导入图库…"
+        r.state = .importing
+        try save(r)
+        r.photoID = try await importer.importLive(pair,asset: r.asset)
+        r.state = .imported
         r.error = nil
+        r.nextAttempt = nil
         try save(r)
         return
       }
-      try Task.checkCancellation()
-      status = "正在将 Live Photo 配对导入图库…"
-      r.state = .importing
-      try save(r)
-      r.photoID = try await importer.importLive(pair, asset: r.asset)
-      r.state = .imported
-      r.error = nil
-      r.nextAttempt = nil
-      try save(r)
-      return
-    }
-    if let id = ledger.duplicates(hash: hash, excluding: r.id, account: r.asset.account)
-      .compactMap(\.photoID).first(where: { importer.exists($0) })
-    {
-      if r.asset.isVideo { try await importer.verifyOriginalVideo(id, hash: hash) }
-      r.photoID = id
-      r.state = .duplicate
-      r.error = nil
-      try save(r)
-      return
-    }
-    if let id = try await importer.findExisting(
-      asset: r.asset, hash: hash)
-    {
-      r.photoID = id
-      r.state = .duplicate
-      r.error = nil
-      try save(r)
-      return
+    } else if let saved = r.staticFallback {
+      let fallback = try await StaticPhotoFallback.prepare(file,asset: r.asset,sourceHash: hash,reason: saved.reason)
+      r.staticFallback = fallback.info
+      fileToImport = fallback.file; assetToImport = fallback.asset; hashToImport = fallback.info.stillHash
     }
     try Task.checkCancellation()
     r.state = .importing
     try save(r)
-    let id = try await importer.importFile(file, asset: r.asset, hash: hash)
+    if r.staticFallback != nil { status = "实况转换失败，正在按静态照片导入：\(r.asset.filename)" }
+    let id = try await importer.importFile(fileToImport, asset: assetToImport, hash: hashToImport,
+      staticFallback: r.staticFallback)
     r.photoID = id
     r.state = .imported
     r.error = nil

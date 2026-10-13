@@ -84,6 +84,7 @@ final class PhotoImporter {
 }
 __DATE_FAILURE__
 struct ConfirmedImportFailure: Error {}
+struct StaticFallbackInfo: Codable { let sourceHash: String; let stillHash: String; let reason: String }
 enum SessionState { case loginRequired }
 struct SessionAccessFailure: Error { init(_ state: SessionState) {} }
 struct WebSpy { var requiresLogin = false }
