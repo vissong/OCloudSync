@@ -4,6 +4,56 @@
   if (window.OCloudBridge) return;
   const cache = new Map();
   let component, requestSerial = 0, requirePage, preparation, preparationSerial = 0;
+  let listRequest, listClientWrapped = false;
+  function beginRead(action) {
+    const serial=requestSerial;
+    listRequest={serial,kind:'pending',retries:0};
+    action();return {serial};
+  }
+  function wrapListClient() {
+    if(listClientWrapped)return;
+    const client=requirePage('ff59').a, endpoints=requirePage('9ca4').a;
+    const count=endpoints.photocount, list=endpoints.photodownloadlist;
+    const paths=['/portal/h5/album/v1/getAlbumCount','/albumpc/v4/download-mode-data'];
+    const origins=['https://cloud.oppo.com','https://ck-rest-cn.oppo.com','https://ck-rest-sg.oppo.com','https://ck-rest-in.oppo.com'];
+    [count,list].forEach((endpoint,index)=>{
+      const url=new URL(endpoint,location.origin);
+      if(!origins.includes(url.origin)||url.pathname!==paths[index]||url.search||url.hash||url.username||url.password)throw new Error('API_CHANGED');
+    });
+    if(typeof client.encryptPost!=='function')throw new Error('API_CHANGED');
+    const post=client.encryptPost;
+    client.encryptPost=function(endpoint,...args) {
+      const request=listRequest;
+      if(!request || ![count,list].includes(endpoint))return post.call(this,endpoint,...args);
+      const current=()=>listRequest===request && !['failed','loginRequired','retired'].includes(request.kind);
+      // The vendor count catch starts extra requests. Native polling owns failure/cancellation;
+      // leave abandoned vendor chains unsettled until this document is retired/reloaded.
+      const abandon=()=>new Promise(()=>{});
+      const fail=(code)=>{if(current())Object.assign(request,{kind:code===403?'loginRequired':'failed',...(Number.isInteger(code)?{code}:{})})};
+      if(!current())return abandon();
+      request.retries=0;delete request.code;
+      return (async()=>{
+        // Retry only these read-only endpoints, with the same page/ticket/cursor.
+        for(let attempt=0; ; attempt++) {
+          if(!current())return abandon();
+          request.kind='pending';
+          let value;
+          try {value=await post.call(client,endpoint,...args)}
+          catch(error){fail(Number(error?.response?.status));return abandon()}
+          if(!current())return abandon();
+          const code=typeof value?.code==='number'?value.code:undefined;
+          if((code===400||code===408||code===429||code>=500&&code<=599)&&attempt<2) {
+            request.kind='retrying';request.retries=attempt+1;
+            await new Promise(resolve=>setTimeout(resolve,1000*(attempt+1)));
+            continue;
+          }
+          if(code!==200 || !(endpoint===count?value?.data?.fileCount:Array.isArray(value?.data?.items))){fail(code);return abandon()}
+          return value;
+        }
+      })();
+    };
+    listClientWrapped=true;
+  }
   function exitClient() {
     if (!requirePage) {
       const queue=window.webpackJsonp, id='ocloud-list-'+Date.now();
@@ -11,6 +61,7 @@
       queue.push([[id],{[id]:function(module,exports,require){requirePage=require}},[[id]]]);
     }
     if (!requirePage) throw new Error('PAGE_NOT_READY');
+    wrapListClient();
     const api=requirePage('ccde').b, endpoint=requirePage('9ca4').a.photodownloadexit;
     const url=new URL(endpoint,location.origin);
     const origins=['https://cloud.oppo.com','https://ck-rest-cn.oppo.com','https://ck-rest-sg.oppo.com','https://ck-rest-in.oppo.com'];
@@ -45,11 +96,18 @@
     return result;
   }
   window.OCloudBridge={
+    requestState(afterSerial){
+      if(!listRequest||listRequest.serial!==afterSerial)return null;
+      const {kind,code,retries}=listRequest;return {kind,...(Number.isInteger(code)?{code}:{}),retries};
+    },
+    // Failed scans require a page reload. Keep a tombstone to block late signing callbacks.
+    retire(completed){listRequest=completed===true?undefined:{kind:'retired'}},
     status(){const c=find();return {ready:true,total:Number(c.photoFlallsTotal),serial:requestSerial,shown:!!c.showDownloadPage}},
     prepare(){
       if(preparation?.kind==='pending')return {ticket:preparation.ticket};
       const ticket=++preparationSerial;
       preparation={ticket,kind:'pending'};cache.clear();
+      listRequest=undefined;
       try {
         const c=find();if(c.currentDevice.modeType!=='sync')throw new Error('SOURCE_CHANGED');
         const {api,endpoint}=exitClient();
@@ -71,12 +129,12 @@
     begin(){
       if(preparation?.kind!=='ready')throw new Error('FRESH_LIST_REQUIRED');
       preparation=undefined;
-      const c=find();cache.clear();const serial=requestSerial;
-      if(!c.showDownloadPage)c.open();else c.loadPhotoCount();return {serial};
+      const c=find();cache.clear();
+      return beginRead(()=>{if(!c.showDownloadPage)c.open();else c.loadPhotoCount()});
     },
     read(afterSerial){if(Number.isInteger(afterSerial)&&requestSerial<=afterSerial)return null;const c=find();if(c.curTabName!=='photo'||c.currentDevice.modeType!=='sync')throw new Error('SOURCE_CHANGED');return {serial:requestSerial,page:c.currentPage,pageSize:c.pageSize,total:c.photoFlallsTotal,final:!!c.renderObj.final,finalPage:!!c.renderObj.finalPage,items:c.renderObj.renderList.map(row)}},
-    next(){const c=find();const s=requestSerial;c.loadData(c.renderObj.last);return {serial:s}},
-    page(n){const c=find();const s=requestSerial;c.handleCurrentChange(n);return {serial:s}},
+    next(){const c=find();return beginRead(()=>c.loadData(c.renderObj.last))},
+    page(n){const c=find();return beginRead(()=>c.handleCurrentChange(n))},
     download(asset){
       const c=find(),key=asset.account+'\0'+asset.remoteID+'\0'+asset.version,item=cache.get(key);
       if(!item)throw new Error('RESCAN_REQUIRED');
