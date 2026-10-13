@@ -12,6 +12,7 @@ import SyncCore
   @Published var fatal: String?
   @Published var completed = 0
   @Published var total = 0
+  @Published var downloadProgress: DownloadProgress?
   @Published var intervalMinutes = 15
   @Published var rangePreview: DateRangePreview?
   @Published var rangeStatus = "选择拍摄日期并预览，再勾选需要导入的文件"
@@ -49,6 +50,7 @@ import SyncCore
       let saved = defaults.integer(forKey: "scanMinutes")
       intervalMinutes = [5, 15, 30, 60].contains(saved) ? saved : 15
       web.onMessage = { [weak self] message in self?.status = message }
+      web.downloadProgress.onUpdate = { [weak self] progress in self?.downloadProgress = progress }
       web.diagnosticsURL = root.appendingPathComponent("session-status.json")
       web.onSessionChange = { [weak self] value in
         guard let self else { return }

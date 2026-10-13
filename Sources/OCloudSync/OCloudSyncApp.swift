@@ -56,7 +56,7 @@ struct Dashboard: View {
           Label("自动同步新增照片与视频", systemImage: "sparkles")
           Text("关闭窗口后继续运行\n退出 App 后停止同步").font(.caption).foregroundStyle(.secondary)
         }
-        Text("本地版本 0.6.0").font(.caption2).foregroundStyle(.tertiary)
+        Text("本地版本 0.6.1").font(.caption2).foregroundStyle(.tertiary)
       }.padding(24).frame(width: 185).background(Color(nsColor: .controlBackgroundColor))
       Divider()
       VStack(alignment: .leading, spacing: 20) {
@@ -90,6 +90,7 @@ struct Dashboard: View {
               model.busy || checkFilename.isEmpty || model.fatal != nil)
           }
           Text(model.status).font(.caption).foregroundStyle(.secondary)
+          if let progress = model.downloadProgress { DownloadProgressView(progress: progress) }
           VStack(alignment: .leading, spacing: 8) {
             HStack {
               Button("检查拍摄时间") { model.checkDates() }.disabled(model.busy || model.fatal != nil)
@@ -138,6 +139,7 @@ struct Dashboard: View {
             sessionStatus
             Text(model.status).textSelection(.enabled).frame(
               maxWidth: .infinity, alignment: .leading)
+            if let progress = model.downloadProgress { DownloadProgressView(progress: progress) }
             if let check = model.ledger.lastCheck {
               Text(check.label).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }

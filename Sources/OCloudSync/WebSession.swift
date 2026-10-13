@@ -13,6 +13,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
   private var pending: CheckedContinuation<URL, Error>?
   private var destination: URL?
   private var activeDownload: WKDownload?
+  let downloadProgress = DownloadProgressMonitor()
   private var watchdog: Task<Void, Never>?
   private var gate = OperationGate()
   private var actionTokens = [ObjectIdentifier: UUID]()
@@ -185,6 +186,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
     try Task.checkCancellation()
     let json = String(data: try JSONEncoder().encode(asset), encoding: .utf8)!
     let id = try gate.begin()
+    downloadProgress.begin(token: id, filename: asset.filename, totalBytes: asset.bytes)
     destination = url
     expectedFileID = asset.fileID
     try? FileManager.default.removeItem(at: url)
@@ -212,6 +214,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
   func cancelDownload(message: String, reload: Bool = true, failure: Error? = nil) {
     guard let token = gate.active else { return }
     gate.cancel(token)
+    downloadProgress.end(token: token)
     needsRescan = true
     // Retire the page's delayed signing/form callbacks before allowing another request.
     if reload { webView.reload() }
@@ -225,6 +228,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
   }
   private func finish(_ result: Result<URL, Error>, token: UUID) {
     guard gate.finish(token) else { return }
+    downloadProgress.end(token: token)
     watchdog?.cancel()
     watchdog = nil
     activeDownload = nil
@@ -286,6 +290,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
     }
     activeDownload = download
     download.delegate = self
+    downloadProgress.observe(download.progress, token: token)
   }
   func download(
     _ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String,

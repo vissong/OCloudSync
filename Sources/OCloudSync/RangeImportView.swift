@@ -40,6 +40,7 @@ struct RangeImportView: View {
       } else {
         Text(model.rangeStatus).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
       }
+      if let progress = model.downloadProgress { DownloadProgressView(progress: progress) }
       if let preview = model.rangePreview {
         previewContent(preview)
       } else {
