@@ -54,6 +54,10 @@ final class VideoTests: XCTestCase {
     defer { try? FileManager.default.removeItem(at: directory) }
     let file = directory.appendingPathComponent("original.part.mp4")
     let writer = try AVAssetWriter(outputURL: file, fileType: .mp4)
+    let created = AVMutableMetadataItem()
+    created.identifier = .quickTimeMetadataCreationDate
+    created.value = "2020-02-03T04:05:06+08:00" as NSString
+    writer.metadata = [created]
     let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
       AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 128, AVVideoHeightKey: 64])
     input.transform = CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 64, ty: 0)
@@ -74,6 +78,9 @@ final class VideoTests: XCTestCase {
     let expected = try RemoteAsset.hashFile(file)
     let actual = try await MediaFileValidator.validate(file, asset: original)
     XCTAssertEqual(actual, expected) // Download staging suffix, rotated dimensions and original bytes
+    let resolved = try MediaDateResolver.resolve(asset: original, file: file)
+    XCTAssertEqual(resolved.source, .originalCreation)
+    XCTAssertEqual(resolved.date, ISO8601DateFormatter().date(from: "2020-02-03T04:05:06+08:00"))
     var wrong = original; wrong.width = 1920
     do { _ = try await MediaFileValidator.validate(file, asset: wrong); XCTFail("wrong dimensions accepted") } catch {}
     wrong = original; wrong.bytes += 1

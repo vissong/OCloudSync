@@ -8,12 +8,20 @@ struct ConfirmedImportFailure: LocalizedError {
   let errorDescription: String?
   init(_ message: String = "系统明确拒绝了 Live Photo 导入，已保留原图与配对资源，将稍后重试") { errorDescription = message }
 }
+struct DateVerificationPending: LocalizedError {
+  let photoID: String
+  var errorDescription: String? { "文件已导入，拍摄时间待修复；请在任务记录中检查拍摄时间" }
+}
 
 final class PhotoImporter {
   struct Receipt: Codable {
     let photoID: String
     var livePhoto: LivePhotoManifest?
     var sourceHash: String?
+    var mediaDate: ResolvedMediaDate?
+    var dateVerified: Bool?
+    var pendingDate: ResolvedMediaDate?
+    var dateBeforeRepair: Date?
   }
   let journalDirectory: URL
   init(directory: URL) throws {
@@ -30,7 +38,7 @@ final class PhotoImporter {
       throw SyncFailure("请先授权照片图库访问")
     }
   }
-  private func lookupOptions() -> PHFetchOptions {
+  func lookupOptions() -> PHFetchOptions {
     let options = PHFetchOptions()
     options.includeHiddenAssets = true
     options.includeAllBurstAssets = true
@@ -101,12 +109,14 @@ final class PhotoImporter {
   }
   func importLive(_ pair: PreparedLivePhoto, asset: RemoteAsset) async throws -> String {
     let manifest = pair.manifest
+    let mediaDate: ResolvedMediaDate
     do {
       try Task.checkCancellation()
       try checkPermission()
       guard try RemoteAsset.hashFile(pair.still) == manifest.stillHash,
         try RemoteAsset.hashFile(pair.movie) == manifest.movieHash
       else { throw SyncFailure("配对文件在导入前发生变化") }
+      mediaDate = try MediaDateResolver.resolve(asset: asset, file: pair.still)
     } catch {
       throw ConfirmedImportFailure("导入前检查未通过，可重试：" + error.localizedDescription)
     }
@@ -119,6 +129,7 @@ final class PhotoImporter {
     do {
       try await PHPhotoLibrary.shared().performChanges {
         let request = PHAssetCreationRequest.forAsset()
+        request.creationDate = mediaDate.date
         let stillOptions = PHAssetResourceCreationOptions()
         stillOptions.originalFilename = basename + ".heic"
         let movieOptions = PHAssetResourceCreationOptions()
@@ -128,7 +139,7 @@ final class PhotoImporter {
         identifier = request.placeholderForCreatedAsset?.localIdentifier
         if let id = identifier {
           do {
-            try JSONEncoder().encode(Receipt(photoID: id, livePhoto: manifest)).write(
+            try JSONEncoder().encode(Receipt(photoID: id, livePhoto: manifest, mediaDate: mediaDate)).write(
               to: journal, options: .atomic)
             try FileManager.default.setAttributes(
               [.posixPermissions: 0o600], ofItemAtPath: journal.path)
@@ -143,6 +154,7 @@ final class PhotoImporter {
     if let journalError { throw journalError }
     guard let identifier else { throw SyncFailure("Live Photo 导入结果不确定，将先核对回执") }
     try await verifyLiveAsset(identifier, manifest: manifest)
+    try confirmImportedDate(asset.key, id: identifier, expected: mediaDate.date)
     return identifier
   }
   /// A filename is only a candidate filter; bytes determine duplication.
@@ -172,12 +184,14 @@ final class PhotoImporter {
       }, onCancel: { operation.cancel(CancellationError()) })
   }
   func importFile(_ file: URL, asset: RemoteAsset, hash: String) async throws -> String {
+    let mediaDate: ResolvedMediaDate
     do {
       try Task.checkCancellation()
       try checkPermission()
       guard try await validate(file, asset: asset) == hash else {
         throw SyncFailure("原文件在导入前发生变化")
       }
+      mediaDate = try MediaDateResolver.resolve(asset: asset, file: file)
       try Task.checkCancellation()
     } catch {
       throw ConfirmedImportFailure("导入前检查未通过，可重试：" + error.localizedDescription)
@@ -188,13 +202,14 @@ final class PhotoImporter {
     do {
       try await PHPhotoLibrary.shared().performChanges {
         let request = PHAssetCreationRequest.forAsset()
+        request.creationDate = mediaDate.date
         let options = PHAssetResourceCreationOptions()
         options.originalFilename = (asset.filename as NSString).lastPathComponent
         request.addResource(with: asset.isVideo ? .video : .photo, fileURL: file, options: options)
         identifier = request.placeholderForCreatedAsset?.localIdentifier
         if let id = identifier {
           do {
-            try JSONEncoder().encode(Receipt(photoID: id, sourceHash: hash)).write(to: journal, options: .atomic)
+            try JSONEncoder().encode(Receipt(photoID: id, sourceHash: hash, mediaDate: mediaDate)).write(to: journal, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: journal.path)
           } catch { journalError = error }
         }
@@ -206,7 +221,27 @@ final class PhotoImporter {
     if let journalError { throw journalError }
     guard let identifier else { throw SyncFailure("图库导入结果不确定，将先核对回执") }
     if asset.isVideo { try await verifyOriginalVideo(identifier, hash: hash) }
+    try confirmImportedDate(asset.key, id: identifier, expected: mediaDate.date)
     return identifier
+  }
+
+  func verifyCreationDate(_ id: String, expected: Date) throws {
+    try checkPermission()
+    guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: lookupOptions()).firstObject,
+      let actual = asset.creationDate, abs(actual.timeIntervalSince(expected)) < 1
+    else { throw SyncFailure("图库拍摄时间尚未确认，已保留回执；请检查并修复已有日期") }
+  }
+
+  func confirmImportedDate(_ key: String, id: String, expected: Date) throws {
+    try checkPermission()
+    guard exists(id), var saved = try receipt(for: key), saved.photoID == id,
+      saved.mediaDate?.date == expected else { throw SyncFailure("已提交资源的日期回执尚未确认，保留记录等待核对") }
+    do { try verifyCreationDate(id, expected: expected) }
+    catch { throw DateVerificationPending(photoID: id) }
+    saved.dateVerified = true
+    let journal = journalDirectory.appendingPathComponent(key + ".json")
+    try JSONEncoder().encode(saved).write(to: journal, options: .atomic)
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: journal.path)
   }
 
 }
