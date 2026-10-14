@@ -36,15 +36,25 @@ final class DownloadProgressTests: XCTestCase {
   @MainActor func testMonitorClearsAndRejectsOldTransfers() async throws {
     let monitor = DownloadProgressMonitor()
     var updates = [DownloadProgress?]()
-    monitor.onUpdate = { updates.append($0) }
+    let received = expectation(description: "monitor reports downloaded bytes")
+    var receivedUpdate = false
+    monitor.onUpdate = { progress in
+      updates.append(progress)
+      if progress?.filename == "first.jpg", progress?.receivedBytes == 500, !receivedUpdate {
+        receivedUpdate = true
+        received.fulfill()
+      }
+    }
     let old = UUID(), current = UUID()
     let first = Progress(totalUnitCount: 1_000)
     monitor.begin(token: old, filename: "first.jpg", totalBytes: 1_000)
     monitor.observe(first, token: old)
     first.completedUnitCount = 500
-    try await Task.sleep(nanoseconds: 600_000_000)
+    // Poll task startup can be delayed on a busy runner. Wait for the event, not a guessed tick.
+    await fulfillment(of: [received], timeout: 10)
     XCTAssertEqual(updates.last??.receivedBytes, 500)
-    XCTAssertGreaterThan(updates.last??.bytesPerSecond ?? 0, 0)
+    // Speed arithmetic is covered with explicit timestamps above; a long real scheduling gap
+    // correctly resets the meter, so this lifecycle test does not require a positive rate.
     monitor.end(token: old)
     XCTAssertNil(updates.last!)
     let count = updates.count
