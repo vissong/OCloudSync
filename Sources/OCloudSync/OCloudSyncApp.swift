@@ -57,7 +57,7 @@ struct Dashboard: View {
           Label("自动同步新增照片与视频", systemImage: "sparkles")
           Text("关闭窗口后继续运行\n退出 App 后停止同步").font(.caption).foregroundStyle(.secondary)
         }
-        Text("本地版本 0.8.1").font(.caption2).foregroundStyle(.tertiary)
+        Text("本地版本 0.8.2").font(.caption2).foregroundStyle(.tertiary)
       }.padding(24).frame(width: 185).background(Color(nsColor: .controlBackgroundColor))
       Divider()
       VStack(alignment: .leading, spacing: 20) {
@@ -184,7 +184,7 @@ struct Dashboard: View {
             Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 16))
           HStack {
             Text(
-              "照片与视频首次启用时分别建立历史基线。支持 JPEG / HEIC / PNG、OPPO JPEG 实况，以及 MP4 / MOV / M4V 视频。\n视频原文件直接导入，不转码；已下载原文件保留在本机缓存，云端文件不会被删除。"
+              "照片与视频首次启用时分别建立历史基线。支持 JPEG / HEIC / PNG、OPPO JPEG 实况，以及 MP4 / MOV / M4V 视频。\n视频不重新编码；必要时生成无损兼容副本。已下载原文件保留在本机缓存，云端文件不会被删除。"
             ).font(
               .caption
             ).foregroundStyle(.secondary)

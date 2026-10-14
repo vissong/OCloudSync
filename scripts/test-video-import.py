@@ -24,6 +24,7 @@ struct RemoteAsset {
 }
 struct ResolvedMediaDate: Codable { let date: Date }
 struct StaticFallbackInfo: Codable { let sourceHash: String; let stillHash: String; let reason: String }
+struct VideoCompatibilityInfo: Codable { let sourceHash: String; let importHash: String }
 enum MediaDateResolver {
   static let expected = Date(timeIntervalSince1970: 1_780_000_000)
   static func resolve(asset: RemoteAsset, file: URL) throws -> ResolvedMediaDate { ResolvedMediaDate(date: expected) }
@@ -61,12 +62,14 @@ final class ImportSpy {
   var verificationFails = false
   var dateFails = false
   var verified = false
+  var verifiedHash: String?
   init(_ directory: URL) { journalDirectory = directory }
   func exists(_ id: String) -> Bool { true }
   func checkPermission() throws { if !allowed { throw SyncFailure("denied") } }
   func validate(_ file: URL, asset: RemoteAsset) async throws -> String { validationHash }
   func verifyOriginalVideo(_ id: String, hash: String) async throws {
     verified = true
+    verifiedHash = hash
     if verificationFails { throw SyncFailure("uncertain verification") }
   }
   func verifyLiveAsset(_ id: String, manifest: LivePhotoManifest) async throws {}
@@ -140,6 +143,20 @@ __METHOD__
     try spy.confirmImportedDate(pending.key, id: "synthetic-receipt", expected: MediaDateResolver.expected)
     let recoveredReceipt = try spy.receipt(for: pending.key)
     precondition(recoveredReceipt?.dateVerified == true)
+    let compatible = VideoCompatibilityInfo(sourceHash: "cloud-original", importHash: "hash")
+    _ = try await spy.importFile(file, asset: asset, hash: "hash", videoCompatibility: compatible)
+    let videoReceipt = try spy.receipt(for: asset.key)
+    precondition(videoReceipt?.sourceHash == "cloud-original")
+    precondition(videoReceipt?.videoCompatibility?.importHash == "hash")
+    precondition(spy.verifiedHash == "hash")
+    precondition(videoReceipt?.mediaDate?.date == MediaDateResolver.expected)
+    let countBeforeInvalid = PHAssetCreationRequest.resources.count
+    do {
+      _ = try await spy.importFile(file, asset: asset, hash: "hash",
+        videoCompatibility: VideoCompatibilityInfo(sourceHash: "original", importHash: "wrong"))
+      fatalError("invalid compatible video receipt imported")
+    } catch is ConfirmedImportFailure {}
+    precondition(PHAssetCreationRequest.resources.count == countBeforeInvalid)
     print("PASS: video/photo/live capture dates, receipts, resource type, confirmed rejection, uncertain verification, preflight guards")
   }
 }

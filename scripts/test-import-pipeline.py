@@ -54,6 +54,7 @@ typealias PreparedLivePhoto = Pair
     var photoID: String, livePhoto: LivePhotoManifest?, sourceHash: String?
     var mediaDate: ResolvedMediaDate?, dateVerified: Bool?
     var staticFallback: StaticFallbackInfo?
+    var videoCompatibility: VideoCompatibilityInfo?
   }
   var receipts = [String: Receipt](), hashes = [String: String]()
   var imports = [String](), active = 0, maxActive = 0, validates = 0
@@ -72,7 +73,9 @@ typealias PreparedLivePhoto = Pair
     return asset.remoteID.hasPrefix("same") ? "same-hash" : asset.remoteID
   }
   func verifyLiveAsset(_ id: String, manifest: LivePhotoManifest) async throws {}
-  func verifyOriginalVideo(_ id: String, hash: String) async throws {}
+  func verifyOriginalVideo(_ id: String, hash: String) async throws {
+    guard hashes[id] == hash else { throw SyncFailure("video resource mismatch") }
+  }
   func verifyStaticAsset(_ id: String, hash: String) async throws {
     staticVerifications += 1
     guard hashes[id] == hash else { throw SyncFailure("static resource mismatch") }
@@ -89,7 +92,8 @@ typealias PreparedLivePhoto = Pair
     return hashes.first { $0.value == hash }?.key
   }
   func importLive(_ pair: Pair, asset: RemoteAsset) async throws -> String { throw SyncFailure("not used") }
-  func importFile(_ file: URL, asset: RemoteAsset, hash: String, staticFallback: StaticFallbackInfo? = nil) async throws -> String {
+  func importFile(_ file: URL, asset: RemoteAsset, hash: String, staticFallback: StaticFallbackInfo? = nil,
+    videoCompatibility: VideoCompatibilityInfo? = nil) async throws -> String {
     active += 1; maxActive = max(maxActive, active)
     defer { active -= 1 }
     onImport?()
@@ -108,7 +112,8 @@ typealias PreparedLivePhoto = Pair
     imports.append(asset.remoteID)
     hashes[asset.remoteID] = hash
     receipts[asset.key] = Receipt(photoID: asset.remoteID,livePhoto: nil,
-      sourceHash: staticFallback?.sourceHash ?? hash,staticFallback: staticFallback)
+      sourceHash: videoCompatibility?.sourceHash ?? staticFallback?.sourceHash ?? hash,
+      staticFallback: staticFallback,videoCompatibility: videoCompatibility)
     return asset.remoteID
   }
 }
@@ -295,7 +300,26 @@ __METHODS__
   LivePhotoConverter.succeed = false
   precondition(vp.imports.isEmpty && rejectedLive.ledger.records[vi[0].id]?.staticFallback == nil)
   precondition(rejectedLive.ledger.records[vi[0].id]?.state == .importing)
-  print("PASS: production queue overlap, serialized dedup, cache and receipt recovery, per-file failure, auth/storage/cancellation drain, outcome progress")
+  // Recovery must compare the actual imported video, preserving the original source hash.
+  for withReceipt in [true, false] {
+    let (videoModel, videoImporter, videoRecords) = setup(["compatible-video"])
+    var video = videoRecords[0]
+    video.asset.mediaType = 3; video.asset.filename = "compatible-video.mp4"
+    video.state = .importing; video.sha256 = "original-video"
+    let info = VideoCompatibilityInfo(sourceHash: "original-video", importHash: "compatible-video")
+    videoImporter.hashes["existing-video"] = info.importHash
+    if withReceipt {
+      videoImporter.receipts[video.id] = PhotoImporter.Receipt(photoID: "existing-video", livePhoto: nil,
+        sourceHash: info.sourceHash, videoCompatibility: info)
+    } else { video.videoCompatibility = info }
+    videoModel.ledger.records[video.id] = video
+    try await videoModel.run([video],videoImporter,folder)
+    let restoredVideo = videoModel.ledger.records[video.id]!
+    precondition(restoredVideo.state == .imported && restoredVideo.photoID == "existing-video")
+    precondition(restoredVideo.sha256 == "original-video" && restoredVideo.videoCompatibility == info)
+    precondition(videoImporter.imports.isEmpty && videoModel.web.downloads.isEmpty)
+  }
+  print("PASS: production queue overlap, serialized dedup, cache and receipt recovery, compatible-video recovery, per-file failure, auth/storage/cancellation drain, outcome progress")
  }
 }
 '''.replace('__METHODS__', '\n'.join(methods))

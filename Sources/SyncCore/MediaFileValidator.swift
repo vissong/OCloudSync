@@ -2,6 +2,10 @@ import AVFoundation
 import Foundation
 import ImageIO
 
+public struct VideoPlaybackUnsupported: LocalizedError {
+  public var errorDescription: String? { "macOS 无法播放此视频编码或封装；保留原文件等待兼容处理" }
+}
+
 /// Reads local originals on a worker task; it never transcodes or opens a Photos library.
 public enum MediaFileValidator {
   public static func validate(_ file: URL, asset: RemoteAsset) async throws -> String {
@@ -23,7 +27,7 @@ public enum MediaFileValidator {
       let playable = try await movie.load(.isPlayable)
       let duration = try await movie.load(.duration).seconds
       let tracks = try await movie.loadTracks(withMediaType: .video)
-      guard playable, duration.isFinite, duration > 0, let track = tracks.first else {
+      guard duration.isFinite, duration > 0, let track = tracks.first else {
         throw SyncFailure("视频格式、轨道或时长校验未通过；保留原文件等待重试")
       }
       let raw = try await track.load(.naturalSize)
@@ -35,6 +39,7 @@ public enum MediaFileValidator {
       guard asset.width > 0, asset.height > 0, raw.width > 0, raw.height > 0,
         matches(raw) || matches(display)
       else { throw SyncFailure("视频尺寸与云端不一致；保留原文件等待重试") }
+      guard playable else { throw VideoPlaybackUnsupported() }
     } else {
       guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
         asset.isMotionJPEG ? CGImageSourceGetCount(source) >= 1 : CGImageSourceGetCount(source) == 1,

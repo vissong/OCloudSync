@@ -623,6 +623,7 @@ import SyncCore
     // Reconcile the local identifier from either ledger or pre-commit journal.
     let receipt = try importer.receipt(for: r.id)
     r.staticFallback = r.staticFallback ?? receipt?.staticFallback
+    r.videoCompatibility = r.videoCompatibility ?? receipt?.videoCompatibility
     if let id = r.photoID ?? receipt?.photoID, importer.exists(id) {
       if let fallback = r.staticFallback {
         try await importer.verifyStaticAsset(id,hash: fallback.stillHash)
@@ -637,11 +638,11 @@ import SyncCore
         r.sha256 = manifest.sourceHash
       }
       if r.asset.isVideo {
-        guard let hash = r.sha256 ?? receipt?.sourceHash else {
+        guard let hash = r.videoCompatibility?.importHash ?? r.sha256 ?? receipt?.sourceHash else {
           throw SyncFailure("缺少视频原文件校验回执，暂停重复导入")
         }
         try await importer.verifyOriginalVideo(id, hash: hash)
-        r.sha256 = hash
+        r.sha256 = r.videoCompatibility?.sourceHash ?? hash
       } else if !r.asset.isMotionJPEG {
         guard let hash = r.sha256 ?? receipt?.sourceHash else {
           throw SyncFailure("缺少照片原文件校验回执，暂停重复导入")
@@ -684,10 +685,10 @@ import SyncCore
       throw SyncFailure("上次 Live Photo 导入结果尚未确认，保留回执并暂停重复导入；重试会先核对图库")
     }
     if r.asset.isVideo && r.state == .importing {
-      if let hash = r.sha256 ?? receipt?.sourceHash,
+      if let hash = r.videoCompatibility?.importHash ?? r.sha256 ?? receipt?.sourceHash,
         let id = try await importer.findExisting(asset: r.asset, hash: hash)
       {
-        r.photoID = id; r.sha256 = hash; r.state = .imported
+        r.photoID = id; r.sha256 = r.videoCompatibility?.sourceHash ?? hash; r.state = .imported
         r.error = nil; r.nextAttempt = nil
         try save(r)
         return
@@ -723,6 +724,13 @@ import SyncCore
       return
     }
     var fileToImport = file, assetToImport = r.asset, hashToImport = hash
+    if r.asset.isVideo {
+      status = "正在检查视频封装兼容性：\(r.asset.filename)"
+      let video = try await VideoCompatibility.prepare(file, asset: r.asset, sourceHash: hash)
+      r.videoCompatibility = video.info
+      fileToImport = video.file; hashToImport = video.hash
+      try save(r)
+    }
     if r.asset.isMotionJPEG && r.staticFallback == nil {
       status = "正在转换实况照片：\(r.asset.filename)"
       let pair: PreparedLivePhoto?
@@ -761,7 +769,7 @@ import SyncCore
     try save(r)
     if r.staticFallback != nil { status = "实况转换失败，正在按静态照片导入：\(r.asset.filename)" }
     let id = try await importer.importFile(fileToImport, asset: assetToImport, hash: hashToImport,
-      staticFallback: r.staticFallback)
+      staticFallback: r.staticFallback, videoCompatibility: r.videoCompatibility)
     r.photoID = id
     r.state = .imported
     r.error = nil

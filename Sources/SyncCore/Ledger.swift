@@ -100,9 +100,11 @@ public struct SyncRecord: Codable, Identifiable, Sendable {
   public var photoID: String?
   public var livePhoto: LivePhotoManifest?
   public var staticFallback: StaticFallbackInfo?
+  public var videoCompatibility: VideoCompatibilityInfo?
   public var duplicateReason: String?
   public var updatedAt = Date()
   public var resultLabel: String {
+    if state == .imported && videoCompatibility != nil { return "视频已兼容导入" }
     if state == .imported && staticFallback != nil { return "已按静态照片导入" }
     if state == .imported && livePhoto != nil { return "Live Photo 已导入" }
     if state == .unsupported && asset.isMotion { return "此实况格式暂不支持" }

@@ -23,6 +23,7 @@ final class PhotoImporter {
     var pendingDate: ResolvedMediaDate?
     var dateBeforeRepair: Date?
     var staticFallback: StaticFallbackInfo?
+    var videoCompatibility: VideoCompatibilityInfo?
   }
   let journalDirectory: URL
   init(directory: URL) throws {
@@ -54,7 +55,11 @@ final class PhotoImporter {
     return try JSONDecoder().decode(Receipt.self, from: Data(contentsOf: url))
   }
   func validate(_ file: URL, asset: RemoteAsset) async throws -> String {
-    try await MediaFileValidator.validate(file, asset: asset)
+    if asset.isVideo {
+      let video = try await VideoCompatibility.prepare(file, asset: asset)
+      return video.info?.sourceHash ?? video.hash
+    }
+    return try await MediaFileValidator.validate(file, asset: asset)
   }
   func verifyOriginalVideo(_ id: String, hash: String) async throws {
     try checkPermission()
@@ -219,13 +224,18 @@ final class PhotoImporter {
       }, onCancel: { operation.cancel(CancellationError()) })
   }
   func importFile(_ file: URL, asset: RemoteAsset, hash: String,
-    staticFallback: StaticFallbackInfo? = nil) async throws -> String {
+    staticFallback: StaticFallbackInfo? = nil, videoCompatibility: VideoCompatibilityInfo? = nil) async throws -> String {
     let mediaDate: ResolvedMediaDate
     do {
       try Task.checkCancellation()
       try checkPermission()
       guard try await validate(file, asset: asset) == hash else {
         throw SyncFailure("原文件在导入前发生变化")
+      }
+      if let videoCompatibility {
+        guard asset.isVideo, staticFallback == nil, videoCompatibility.importHash == hash else {
+          throw SyncFailure("视频兼容副本与导入回执不一致")
+        }
       }
       mediaDate = try MediaDateResolver.resolve(asset: asset, file: file)
       try Task.checkCancellation()
@@ -245,8 +255,8 @@ final class PhotoImporter {
         identifier = request.placeholderForCreatedAsset?.localIdentifier
         if let id = identifier {
           do {
-            try JSONEncoder().encode(Receipt(photoID: id, sourceHash: staticFallback?.sourceHash ?? hash,
-              mediaDate: mediaDate,staticFallback: staticFallback)).write(to: journal, options: .atomic)
+            try JSONEncoder().encode(Receipt(photoID: id, sourceHash: videoCompatibility?.sourceHash ?? staticFallback?.sourceHash ?? hash,
+              mediaDate: mediaDate,staticFallback: staticFallback,videoCompatibility: videoCompatibility)).write(to: journal, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: journal.path)
           } catch { journalError = error }
         }
