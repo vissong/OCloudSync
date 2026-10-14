@@ -6,10 +6,15 @@ OUTPUT_DIR="${OCLOUD_OUTPUT_DIR:-$PROJECT_DIR/../OCloudSync-App}"
 swift build --package-path "$PROJECT_DIR" --scratch-path "$BUILD_DIR" -c release
 BIN_DIR="$(swift build --package-path "$PROJECT_DIR" --scratch-path "$BUILD_DIR" -c release --show-bin-path)"
 APP="$OUTPUT_DIR/OCloudSync.app"
+SIGN_IDENTITY="${OCLOUD_SIGN_IDENTITY:--}"
+SIGN_OPTIONS=(--force --sign "$SIGN_IDENTITY")
+if [ "$SIGN_IDENTITY" != "-" ]; then
+  SIGN_OPTIONS+=(--options runtime --timestamp)
+fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/OCloudSync" "$APP/Contents/MacOS/OCloudSync"
 cp "$BIN_DIR/OCloudLivePhoto" "$APP/Contents/MacOS/OCloudLivePhoto"
-codesign --force --sign - "$APP/Contents/MacOS/OCloudLivePhoto"
+codesign "${SIGN_OPTIONS[@]}" "$APP/Contents/MacOS/OCloudLivePhoto"
 # Bundle resources live in Contents/Resources for a sealed macOS app.
 ditto "$BIN_DIR/OCloudSync_OCloudSync.bundle" "$APP/Contents/Resources/OCloudSync_OCloudSync.bundle"
 cp "$PROJECT_DIR/LICENSE" "$PROJECT_DIR/NOTICE.md" "$APP/Contents/Resources/"
@@ -30,6 +35,6 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>NSPhotoLibraryAddUsageDescription</key><string>将 OPPO 云相册新增照片和视频原文件导入系统照片图库，由系统 iCloud 照片同步。</string>
 </dict></plist>
 PLIST
-codesign --force --deep --sign - "$APP"
+codesign "${SIGN_OPTIONS[@]}" "$APP"
 codesign --verify --deep --strict "$APP"
 printf '%s\n' "$APP"

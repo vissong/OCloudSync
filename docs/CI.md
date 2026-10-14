@@ -35,3 +35,5 @@ CI 只覆盖离线测试与打包。官方登录、真实云相册下载、Photo
 独立的 `secrets.yml` 工作流在 push、PR 和手动运行时执行。使用 Ubuntu 托管 runner、只读权限和完整 Git 历史，下载 Gitleaks 8.30.1 官方发行包并核验固定 SHA-256；无需账号秘密或 Gitleaks 商业 action 授权。
 
 先在临时仓库验证检出、输出脱敏和浅克隆拒绝，再扫描所有已获取引用的完整历史。失败不会被忽略，不上传可能含私人元数据的扫描报告。运行方式见 [贡献指南](../CONTRIBUTING.md)。GitHub 原生 Secret scanning / Push protection 与此 CI 是独立功能，需在仓库设置核对启用状态。
+
+正式签名、公证及带票据打包使用独立的本机流程，见 [签名与公证](SIGNING.md)。CI 运行公证脚本的离线回归，不访问 Apple 公证服务。
