@@ -26,7 +26,9 @@ OCLOUD_OUTPUT_DIR="$PWD/dist/signed" bash scripts/build-app.sh
 python3 scripts/test-livephoto.py dist/signed/OCloudSync.app/Contents/MacOS/OCloudLivePhoto
 ```
 
-脚本分别对转换 helper 和主 App 签名，启用 hardened runtime 与安全时间戳，不添加放宽运行时安全性的 entitlement。省略 `OCLOUD_SIGN_IDENTITY` 时仍使用 ad-hoc 签名，只适合开发和离线 CI。
+脚本分别对转换 helper 和主 App 签名，启用 hardened runtime 与安全时间戳。主 App 使用 `scripts/OCloudSync.entitlements` 声明照片图库访问权限；转换 helper 不访问图库，不附加该权限。省略 `OCLOUD_SIGN_IDENTITY` 时仍使用 ad-hoc 签名，只适合开发和离线 CI。
+
+签名后会检查实际签名中的 `com.apple.security.personal-information.photos-library` 和 Info.plist 的照片用途说明；正式发布还会对最终 ZIP 解压后的 App 再检查一次。仅有用途说明不足以让 hardened runtime App 弹出授权框，缺少 entitlement 时系统会直接拒绝请求。
 
 ## 公证、附加票据和分发
 

@@ -20,9 +20,40 @@ def load(name):
 setup = load("configure-release-secrets")
 metadata = load("validate-release")
 keychain = load("ci-signing-keychain")
+photo_permission = load("validate-photo-permission")
 
 
 class ReleaseCITests(unittest.TestCase):
+    def test_signed_photo_permission_configuration(self):
+        info = {"NSPhotoLibraryUsageDescription": "Read photos", "NSPhotoLibraryAddUsageDescription": "Import photos"}
+        entitlements = {photo_permission.PHOTO_ENTITLEMENT: True}
+        photo_permission.validate(entitlements, info)
+        for value in (None, False, "true", 1):
+            with self.assertRaises(ValueError):
+                photo_permission.validate({photo_permission.PHOTO_ENTITLEMENT: value}, info)
+        with self.assertRaises(ValueError):
+            photo_permission.validate({}, info)
+        for key in info:
+            for value in (None, "", "  "):
+                with self.assertRaises(ValueError):
+                    photo_permission.validate(entitlements, {**info, key: value})
+
+    def test_signed_photo_permission_reads_actual_signature(self):
+        import plistlib
+        with tempfile.TemporaryDirectory() as temp:
+            app = Path(temp) / "OCloudSync.app"
+            (app / "Contents").mkdir(parents=True)
+            (app / "Contents/Info.plist").write_bytes(plistlib.dumps({
+                "NSPhotoLibraryUsageDescription": "Read photos", "NSPhotoLibraryAddUsageDescription": "Import photos"}))
+            for raw, valid in ((b"", False), (plistlib.dumps({}), False),
+                               (plistlib.dumps({photo_permission.PHOTO_ENTITLEMENT: True}), True)):
+                with patch.object(photo_permission.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, raw)) as run:
+                    if valid:
+                        photo_permission.verify(app)
+                    else:
+                        with self.assertRaises(ValueError): photo_permission.verify(app)
+                    self.assertEqual(run.call_args.args[0], ["codesign", "--display", "--entitlements", "-", "--xml", str(app)])
+
     def test_main_only_environment(self):
         env = {"deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}}
         setup.validate_environment(env, {"branch_policies": [{"name": "main", "type": "branch"}]})

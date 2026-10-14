@@ -105,6 +105,7 @@ jobs:
           ditto -x -k OCloudSync-macOS-arm64.zip "$RUNNER_TEMP/distribution-check"
           APP="$RUNNER_TEMP/distribution-check/OCloudSync.app"
           codesign --verify --deep --strict "$APP"
+          python3 "$GITHUB_WORKSPACE/scripts/validate-photo-permission.py" "$APP"
           xcrun stapler validate "$APP"
           spctl --assess --type execute --verbose=2 "$APP"
       - name: Save notarized distribution
