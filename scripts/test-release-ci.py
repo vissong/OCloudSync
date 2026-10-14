@@ -70,6 +70,10 @@ class ReleaseCITests(unittest.TestCase):
             calls = []
             def command(argv, sensitive):
                 calls.append(argv)
+                if argv[:4] == ["security", "list-keychains", "-d", "user"] and "-s" not in argv:
+                    return '\"/tmp/original login.keychain-db\"\n'
+                if "create-keychain" in argv:
+                    (root / "OCloudSync-signing.keychain-db").touch()
                 if "find-identity" in argv:
                     return '1) ' + 'A'*40 + ' "Developer ID Application: Example (EXAMPLE123)"'
                 return ""
@@ -82,6 +86,14 @@ class ReleaseCITests(unittest.TestCase):
             self.assertNotIn("synthetic-app-password", saved)
             self.assertNotIn("-A", next(c for c in calls if "import" in c))
             self.assertIn("--keychain", next(c for c in calls if "store-credentials" in c))
+            searches = [c for c in calls if c[:5] == ["security", "list-keychains", "-d", "user", "-s"]]
+            self.assertEqual(searches, [["security", "list-keychains", "-d", "user", "-s",
+                                        str(root / "OCloudSync-signing.keychain-db"), "/tmp/original login.keychain-db"]])
+            with patch.dict(keychain.os.environ, environment, clear=True), patch.object(keychain, "run", side_effect=command):
+                keychain.cleanup()
+            self.assertIn(["security", "list-keychains", "-d", "user", "-s", "/tmp/original login.keychain-db"], calls)
+            self.assertIn(["security", "delete-keychain", str(root / "OCloudSync-signing.keychain-db")], calls)
+            self.assertFalse((root / "OCloudSync-keychain-search-list.json").exists())
 
     def test_ci_setup_refuses_local_or_wrong_ref(self):
         with patch.dict(keychain.os.environ, {}, clear=True):

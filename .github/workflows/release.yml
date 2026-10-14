@@ -132,10 +132,7 @@ jobs:
           if-no-files-found: error
       - name: Remove temporary signing keychain
         if: always()
-        run: |
-          KEYCHAIN="$RUNNER_TEMP/OCloudSync-signing.keychain-db"
-          if [ -f "$KEYCHAIN" ]; then security delete-keychain "$KEYCHAIN"; fi
-          rm -f "$RUNNER_TEMP/OCloudSync-signing.p12"
+        run: python3 scripts/ci-signing-keychain.py --cleanup
 
   publish:
     name: Create GitHub Release from verified distribution

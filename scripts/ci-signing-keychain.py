@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Import release credentials into a temporary GitHub-hosted macOS runner keychain."""
 import base64
+import json
+import shlex
 import os
 import re
 import secrets
@@ -41,7 +43,8 @@ def setup():
     root = Path(os.environ["RUNNER_TEMP"])
     keychain = root / "OCloudSync-signing.keychain-db"
     certificate = root / "OCloudSync-signing.p12"
-    if keychain.exists() or certificate.exists():
+    search_list = root / "OCloudSync-keychain-search-list.json"
+    if keychain.exists() or certificate.exists() or search_list.exists():
         raise RuntimeError("Temporary signing files already exist; refusing to overwrite them.")
     # Make cleanup possible even if import or validation fails partway through.
     with Path(os.environ["GITHUB_ENV"]).open("a") as env:
@@ -53,6 +56,10 @@ def setup():
         run(["security", "create-keychain", "-p", password, str(keychain)], sensitive)
         run(["security", "set-keychain-settings", "-lut", "21600", str(keychain)], sensitive)
         run(["security", "unlock-keychain", "-p", password, str(keychain)], sensitive)
+        # codesign resolves the private key through the search list even with --keychain.
+        previous = shlex.split(run(["security", "list-keychains", "-d", "user"], sensitive))
+        search_list.write_text(json.dumps(previous))
+        run(["security", "list-keychains", "-d", "user", "-s", str(keychain), *previous], sensitive)
         run(["security", "import", str(certificate), "-P", values["APPLE_CERTIFICATE_PASSWORD"],
              "-k", str(keychain), "-T", "/usr/bin/codesign", "-T", "/usr/bin/security"], sensitive)
         run(["security", "set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", password,
@@ -69,9 +76,35 @@ def setup():
         certificate.unlink(missing_ok=True)
 
 
+def cleanup():
+    if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("GITHUB_REF") != "refs/heads/main":
+        raise RuntimeError("Keychain cleanup is restricted to GitHub Actions running on main.")
+    root = Path(os.environ["RUNNER_TEMP"])
+    search_list = root / "OCloudSync-keychain-search-list.json"
+    keychain = root / "OCloudSync-signing.keychain-db"
+    try:
+        if search_list.exists():
+            previous = json.loads(search_list.read_text())
+            if not isinstance(previous, list) or not all(isinstance(item, str) for item in previous):
+                raise RuntimeError("Invalid saved keychain search list.")
+            run(["security", "list-keychains", "-d", "user", "-s", *previous], [])
+            search_list.unlink()
+    finally:
+        try:
+            if keychain.exists():
+                run(["security", "delete-keychain", str(keychain)], [])
+        finally:
+            (root / "OCloudSync-signing.p12").unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     try:
-        setup()
+        if sys.argv[1:] == ["--cleanup"]:
+            cleanup()
+        elif len(sys.argv) == 1:
+            setup()
+        else:
+            raise RuntimeError("Usage: ci-signing-keychain.py [--cleanup]")
     except (OSError, RuntimeError, ValueError, KeyError) as error:
         print(f"Signing setup stopped: {error}", file=sys.stderr)
         sys.exit(1)

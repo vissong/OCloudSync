@@ -76,7 +76,7 @@ python3 scripts/configure-release-secrets.py \
   --repo OWNER/OCloudSync --team-id YOUR_TEAM_ID
 ```
 
-`.cer` 不包含私钥。应从“钥匙串访问 → 登录 → 我的证书”导出证书及其私钥为 `.p12`。CI 使用临时钥匙串，不修改本机钥匙串；导入只允许代码签名工具访问，验证凭据后销毁导出文件，job 结束时清理临时钥匙串。受信任的 main 代码能够使用这些凭据，因此合入 main 前应审查工作流和发布脚本。
+`.cer` 不包含私钥。应从“钥匙串访问 → 登录 → 我的证书”导出证书及其私钥为 `.p12`。CI 使用临时钥匙串，不修改本机钥匙串；导入只允许代码签名工具访问，验证凭据后销毁导出文件，job 结束时恢复 runner 原钥匙串搜索列表并清理临时钥匙串。受信任的 main 代码能够使用这些凭据，因此合入 main 前应审查工作流和发布脚本。
 
 在 Actions 中打开 **Release signed macOS App → Run workflow**，分支选 `main`，Tag 填与 App 内版本一致的 `vX.Y.Z`。默认创建**草稿 Release**；勾选 `publish` 才立即发布。流程拒绝已有 Tag 或 Release，不重定向旧 Tag、不覆盖已有附件。若需重新发布，应先核对原草稿/版本，不盲目重跑。
 
