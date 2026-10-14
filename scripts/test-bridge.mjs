@@ -116,22 +116,22 @@ for (const exitResponse of [{errorCode:500},{errorCode:403},{errorCode:null},{er
 {
  const replies=[{code:400},{code:429},{code:200,data:{items:[]}}];
  const f=fixture({listReplies:replies});await prepare(f);const marker=f.b.begin();await settle();
- assert.equal(f.b.requestState(marker.serial).kind,'retrying');assert.equal(f.timers[0].delay,1000);
- f.timers.shift().fn();await settle();assert.equal(f.timers[0].delay,2000);
+ assert.equal(f.b.requestState(marker.serial).kind,'retrying');assert.equal(f.timers[0].delay,5000);
+ f.timers.shift().fn();await settle();assert.equal(f.timers[0].delay,15000);
  f.timers.shift().fn();await settle();assert.ok(f.b.read(marker.serial));
  assert.equal(f.listCalls.length,3);assert.deepEqual(f.listCalls[0],f.listCalls[2]);
 }
 {
- const f=fixture({listReplies:[{code:400},{code:400},{code:400}]});await prepare(f);const marker=f.b.begin();await settle();
- f.timers.shift().fn();await settle();f.timers.shift().fn();await settle();
+ const f=fixture({listReplies:[{code:400},{code:400},{code:400},{code:400}]});await prepare(f);const marker=f.b.begin();await settle();
+ for(const delay of [5000,15000,30000]){assert.equal(f.timers[0].delay,delay);f.timers.shift().fn();await settle()}
  assert.equal(f.b.read(marker.serial),null);
- assert.deepEqual(JSON.parse(JSON.stringify(f.b.requestState(marker.serial))),{kind:'failed',code:400,retries:2});
- assert.equal(f.timers.length,0);assert.equal(f.listCalls.length,3);
+ assert.deepEqual(JSON.parse(JSON.stringify(f.b.requestState(marker.serial))),{kind:'failed',code:400,retries:3,activity:7});
+ assert.equal(f.timers.length,0);assert.equal(f.listCalls.length,4);
 }
-for(const reply of [{code:403},{code:401},{code:200},{code:'200',data:{items:[]}},Object.assign(new Error('private detail'),{response:{status:403}}),new Error('offline')]) {
+for(const reply of [{code:403},{code:401},{code:200},{code:'200',data:{items:[]}},Object.assign(new Error('private detail'),{response:{status:403}})]) {
  const f=fixture({listReplies:[reply]});await prepare(f);const marker=f.b.begin();await settle();
  const state=f.b.requestState(marker.serial);
- assert.equal(state.kind,reply.code===403||reply.response?.status===403?'loginRequired':'failed');
+ assert.equal(state.kind,reply.code===403||reply.code===401||reply.response?.status===403?'loginRequired':'failed');
  assert.equal(f.listCalls.length,1);assert.equal(f.timers.length,0);
  assert.equal(JSON.stringify(state).includes('private'),false);
 }
@@ -169,7 +169,40 @@ for(const reply of [{code:403},{code:401},{code:200},{code:'200',data:{items:[]}
  const marker=f.b.begin();assert.equal(f.listCalls.length,0);f.b.retire(false);releaseSigning();await settle();
  assert.equal(f.listCalls.length,0,'cancelled scan must block a list request delayed by signing');assert.equal(f.b.read(marker.serial),null);
 }
-console.log('bridge tests: 40 groups passed');
+
+// Both transport and business failures get the same bounded backoff.
+for(const code of [400,408,429,500,502,503,599]) {
+ const error=Object.assign(new Error('private transport detail'),{response:{status:code}});
+ const f=fixture({listReplies:[error,{code:200,data:{items:[]}}]});await prepare(f);const marker=f.b.begin();await settle();
+ const state=f.b.requestState(marker.serial);
+ assert.equal(state.kind,'retrying');assert.equal(state.code,code);assert.equal(state.retries,1);
+ assert.equal(state.activity,2);assert.ok(state.retryInSeconds>=4 && state.retryInSeconds<=5);
+ assert.equal(f.timers[0].delay,5000);assert.equal(JSON.stringify(state).includes('private'),false);
+ f.timers.shift().fn();await settle();assert.ok(f.b.read(marker.serial));
+ assert.deepEqual(f.listCalls[0],f.listCalls[1]);assert.equal(f.b.requestState(marker.serial).activity,3);
+}
+{
+ const f=fixture({listReplies:[new Error('offline'),new Error('offline'),new Error('offline'),new Error('offline')]});await prepare(f);const marker=f.b.begin();await settle();
+ for(const delay of [5000,15000,30000]){assert.equal(f.timers[0].delay,delay);f.timers.shift().fn();await settle()}
+ assert.equal(f.b.requestState(marker.serial).kind,'failed');assert.equal(f.listCalls.length,4);assert.equal(f.timers.length,0);
+}
+for(const code of [401,403,404,422]) {
+ const f=fixture({listReplies:[Object.assign(new Error('do not retry'),{response:{status:code}})]});await prepare(f);const marker=f.b.begin();await settle();
+ assert.equal(f.b.requestState(marker.serial).kind,[401,403].includes(code)?'loginRequired':'failed');assert.equal(f.timers.length,0);
+}
+{
+ const f=fixture({countLifecycle:true,listReplies:[{code:400},{code:200,data:{fileCount:{photo:1}}},{code:400},{code:200,data:{items:[]}}]});await prepare(f);const marker=f.b.begin();await settle();
+ const countActivity=f.b.requestState(marker.serial).activity;
+ f.timers.shift().fn();await settle();const listState=f.b.requestState(marker.serial);
+ assert.equal(listState.retries,1);assert.ok(listState.activity>countActivity,'count/list progress must not reset the timeout marker');
+ f.timers.shift().fn();await settle();assert.ok(f.b.read(marker.serial));assert.equal(f.listCalls.length,4);
+}
+{
+ const f=fixture({listReplies:[{code:400},{code:400},{code:400},new Error('offline')]});await prepare(f);const marker=f.b.begin();await settle();
+ for(let n=0;n<3;n++){f.timers.shift().fn();await settle()}
+ const state=f.b.requestState(marker.serial);assert.equal(state.kind,'failed');assert.equal(state.code,undefined,'final network failure must clear earlier business code');
+}
+console.log('bridge tests: all cases passed');
 async function settle(){await new Promise(resolve=>setImmediate(resolve))}
 async function prepare(f){const p=f.b.prepare();f.releaseExit();await settle();assert.equal(f.b.prepared(p.ticket).kind,'ready')}
 

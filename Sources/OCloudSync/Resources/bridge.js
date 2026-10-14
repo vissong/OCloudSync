@@ -3,11 +3,12 @@
   if (location.origin !== 'https://cloud.oppo.com') throw new Error('LOGIN_REQUIRED');
   if (window.OCloudBridge) return;
   const cache = new Map();
+  const retryDelays = [5000, 15000, 30000];
   let component, requestSerial = 0, requirePage, preparation, preparationSerial = 0;
   let listRequest, listClientWrapped = false;
   function beginRead(action) {
     const serial=requestSerial;
-    listRequest={serial,kind:'pending',retries:0};
+    listRequest={serial,kind:'pending',retries:0,activity:0};
     action();return {serial};
   }
   function wrapListClient() {
@@ -29,22 +30,29 @@
       // The vendor count catch starts extra requests. Native polling owns failure/cancellation;
       // leave abandoned vendor chains unsettled until this document is retired/reloaded.
       const abandon=()=>new Promise(()=>{});
-      const fail=(code)=>{if(current())Object.assign(request,{kind:code===403?'loginRequired':'failed',...(Number.isInteger(code)?{code}:{})})};
+      const fail=(code)=>{
+        if(!current())return;
+        delete request.code;
+        Object.assign(request,{kind:code===401||code===403?'loginRequired':'failed',...(Number.isInteger(code)?{code}:{})});
+      };
       if(!current())return abandon();
-      request.retries=0;delete request.code;
+      request.retries=0;delete request.code;delete request.retryAt;
       return (async()=>{
         // Retry only these read-only endpoints, with the same page/ticket/cursor.
         for(let attempt=0; ; attempt++) {
           if(!current())return abandon();
-          request.kind='pending';
-          let value;
+          request.kind='pending';request.activity++;delete request.retryAt;
+          let value, code, transportFailure=false;
           try {value=await post.call(client,endpoint,...args)}
-          catch(error){fail(Number(error?.response?.status));return abandon()}
+          catch(error){transportFailure=true;const status=Number(error?.response?.status);if(Number.isInteger(status)&&status>0)code=status}
           if(!current())return abandon();
-          const code=typeof value?.code==='number'?value.code:undefined;
-          if((code===400||code===408||code===429||code>=500&&code<=599)&&attempt<2) {
-            request.kind='retrying';request.retries=attempt+1;
-            await new Promise(resolve=>setTimeout(resolve,1000*(attempt+1)));
+          if(!transportFailure)code=typeof value?.code==='number'?value.code:undefined;
+          const retryable=code===400||code===408||code===429||code>=500&&code<=599||transportFailure&&code===undefined;
+          if(retryable&&attempt<retryDelays.length) {
+            request.kind='retrying';request.retries=attempt+1;request.activity++;
+            if(Number.isInteger(code))request.code=code;else delete request.code;
+            request.retryAt=Date.now()+retryDelays[attempt];
+            await new Promise(resolve=>setTimeout(resolve,retryDelays[attempt]));
             continue;
           }
           if(code!==200 || !(endpoint===count?value?.data?.fileCount:Array.isArray(value?.data?.items))){fail(code);return abandon()}
@@ -98,7 +106,9 @@
   window.OCloudBridge={
     requestState(afterSerial){
       if(!listRequest||listRequest.serial!==afterSerial)return null;
-      const {kind,code,retries}=listRequest;return {kind,...(Number.isInteger(code)?{code}:{}),retries};
+      const {kind,code,retries,activity,retryAt}=listRequest;
+      return {kind,...(Number.isInteger(code)?{code}:{}),retries,activity,
+        ...(kind==='retrying'?{retryInSeconds:Math.max(0,Math.ceil((retryAt-Date.now())/1000))}:{})};
     },
     // Failed scans require a page reload. Keep a tombstone to block late signing callbacks.
     retire(completed){listRequest=completed===true?undefined:{kind:'retired'}},

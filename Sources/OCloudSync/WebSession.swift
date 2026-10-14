@@ -8,6 +8,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
 {
   let webView: WKWebView
   var onMessage: ((String) -> Void)?
+  var onScanMessage: ((String) -> Void)?
   private(set) var needsRescan = false
   private var popups = [NSWindow]()
   private var pending: CheckedContinuation<URL, Error>?
@@ -81,14 +82,17 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
     }
     _ = try await webView.evaluateJavaScript(String(contentsOf: url))
   }
-  func evaluate<T: Decodable>(_ expression: String, as: T.Type) async throws -> T {
+  func evaluate<T: Decodable>(
+    _ expression: String, as: T.Type, timeout: TimeInterval = 5
+  ) async throws -> T {
     if requiresLogin || isLoginPage { throw SessionAccessFailure(.loginRequired) }
     let generation = session.pageGeneration
     try session.validatePage(generation)
     do {
-      let value = try await webView.evaluateJavaScript("JSON.stringify(" + expression + ")")
+      let string = try await sessionJSON(expression, timeout: timeout)
+      try Task.checkCancellation()
       try session.validatePage(generation)
-      guard let string = value as? String, let data = string.data(using: .utf8) else {
+      guard let data = string.data(using: .utf8) else {
         throw SyncFailure("网页返回了无效数据")
       }
       return try JSONDecoder().decode(T.self, from: data)
@@ -127,14 +131,31 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
     throw SessionAccessFailure(.retrying)
   }
   func wait(after serial: Int) async throws -> ScanPage {
-    struct RequestState: Decodable { let kind: String; let code: Int?; let retries: Int }
-    for _ in 0..<90 {
+    struct RequestState: Decodable {
+      let kind: String; let code: Int?; let retries: Int
+      let activity: Int; let retryInSeconds: Int?
+    }
+    var budget = ListRequestWait(startedAt: ProcessInfo.processInfo.systemUptime)
+    var lastMessage: String?
+    while true {
       try Task.checkCancellation()
-      if let page = try await evaluate(
-        "window.OCloudBridge.read(\(serial))", as: ScanPage?.self)
-      { return page }
-      if let state = try await evaluate(
-        "window.OCloudBridge.requestState(\(serial))", as: RequestState?.self) {
+      if budget.hasTimedOut(at: ProcessInfo.processInfo.systemUptime) { break }
+      let page = try await evaluate(
+        "window.OCloudBridge.read(\(serial))", as: ScanPage?.self,
+        timeout: budget.remaining(at: ProcessInfo.processInfo.systemUptime))
+      try Task.checkCancellation()
+      if budget.hasTimedOut(at: ProcessInfo.processInfo.systemUptime) { break }
+      if let page {
+        if lastMessage != nil { onScanMessage?("OPPO 清单重试成功，继续核对…") }
+        return page
+      }
+      let state = try await evaluate(
+        "window.OCloudBridge.requestState(\(serial))", as: RequestState?.self,
+        timeout: budget.remaining(at: ProcessInfo.processInfo.systemUptime))
+      try Task.checkCancellation()
+      if budget.hasTimedOut(at: ProcessInfo.processInfo.systemUptime) { break }
+      if let state {
+        budget.observe(activity: state.activity, at: ProcessInfo.processInfo.systemUptime)
         if state.kind == "loginRequired" {
           resetSession(loginRequired: true)
           throw SessionAccessFailure(.loginRequired)
@@ -144,7 +165,21 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownload
           let retried = state.retries > 0 ? "，已重试 \(state.retries) 次" : ""
           throw SyncFailure("OPPO 清单读取失败（\(code)\(retried)），本次未读取完整；请稍后重试")
         }
+        if state.retries > 0 {
+          let detail = state.code.map { "接口状态 \($0)" } ?? "网络暂时异常"
+          let message = state.kind == "retrying"
+            ? "OPPO 清单\(detail)，\(state.retryInSeconds ?? 0) 秒后重试（\(state.retries)/3）"
+            : "正在重试 OPPO 清单（\(state.retries)/3）…"
+          if message != lastMessage {
+            onScanMessage?(message)
+            lastMessage = message
+          }
+        } else if lastMessage != nil {
+          onScanMessage?("OPPO 清单重试成功，继续核对…")
+          lastMessage = nil
+        }
       }
+      if budget.hasTimedOut(at: ProcessInfo.processInfo.systemUptime) { break }
       try await Task.sleep(nanoseconds: 500_000_000)
     }
     throw SyncFailure("OPPO 列表请求超时，本次不提交基线；稍后可重试")
@@ -500,24 +535,34 @@ extension WebSession {
     try Task.checkCancellation()
     guard session.state == .active else { throw SessionAccessFailure(session.state) }
   }
-  private func sessionJSON(_ expression: String) async throws -> String {
+  private func sessionJSON(_ expression: String, timeout: TimeInterval = 5) async throws -> String {
     try Task.checkCancellation()
-    return try await withCheckedThrowingContinuation { continuation in
-      let request = SessionScriptResult(continuation)
-      request.timer = Task { @MainActor in
-        do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { return }
-        request.resolve(.failure(SessionAccessFailure(.retrying)))
-      }
-      webView.evaluateJavaScript("JSON.stringify(" + expression + ")") { value, error in
-        Task { @MainActor in
-          if let string = value as? String, error == nil {
-            request.resolve(.success(string))
-          } else {
-            request.resolve(.failure(SessionAccessFailure(.retrying)))
+    let request = SessionScriptResult()
+    return try await withTaskCancellationHandler(operation: {
+      try await withCheckedThrowingContinuation { continuation in
+        guard request.begin(continuation) else { return }
+        guard !Task.isCancelled else {
+          request.resolve(.failure(CancellationError()))
+          return
+        }
+        request.timer = Task { @MainActor in
+          do { try await Task.sleep(nanoseconds: UInt64(max(0, min(5, timeout)) * 1_000_000_000)) }
+          catch { return }
+          request.resolve(.failure(SessionAccessFailure(.retrying)))
+        }
+        webView.evaluateJavaScript("JSON.stringify(" + expression + ")") { value, error in
+          Task { @MainActor in
+            if let string = value as? String, error == nil {
+              request.resolve(.success(string))
+            } else {
+              request.resolve(.failure(SessionAccessFailure(.retrying)))
+            }
           }
         }
       }
-    }
+    }, onCancel: {
+      Task { @MainActor in request.resolve(.failure(CancellationError())) }
+    })
   }
   private func refreshSession() async {
     guard !Task.isCancelled else { return }
@@ -604,13 +649,23 @@ extension WebSession {
 @MainActor
 private final class SessionScriptResult {
   private var continuation: CheckedContinuation<String, Error>?
+  private var result: Result<String, Error>?
   var timer: Task<Void, Never>?
-  init(_ continuation: CheckedContinuation<String, Error>) { self.continuation = continuation }
+  func begin(_ continuation: CheckedContinuation<String, Error>) -> Bool {
+    if let result {
+      continuation.resume(with: result)
+      return false
+    }
+    self.continuation = continuation
+    return true
+  }
   func resolve(_ result: Result<String, Error>) {
-    guard let continuation else { return }
+    guard self.result == nil else { return }
+    self.result = result
+    let continuation = self.continuation
     self.continuation = nil
     timer?.cancel()
     timer = nil
-    continuation.resume(with: result)
+    continuation?.resume(with: result)
   }
 }

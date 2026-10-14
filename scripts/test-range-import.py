@@ -24,10 +24,15 @@ import Foundation
   var needsRescan = false
   var calls = 0
   var cancelScan = false
+  var onScanMessage: ((String) -> Void)?
+  var retryMessage: String?
+  var scanError: Error?
   func maintainSession() {}
   func scan(ledger: Ledger = Ledger(), forceFull: Bool = false, pendingAccounts: Set<String> = [], progress: (Int,Int)->Void) async throws -> ScanResult {
     calls += 1
+    if let retryMessage { onScanMessage?(retryMessage) }
     await Task.yield()
+    if let scanError { throw scanError }
     if cancelScan { throw CancellationError() }
     progress(result.assets.count,result.assets.count)
     return result
@@ -44,6 +49,9 @@ import Foundation
   var localRecoveryProgress: ImportProgress?, importProgressIsRange = false
   var enabled = false, session = SessionLease(), nextScan = Date.distantPast, runs = 0
   let web = Web()
+  init() {
+__CALLBACK__
+  }
   var processed = [String](), failSession = false, failFile = false, persisted = 0
   func run() { runs += 1 }
   func fireTimer() { tick() }
@@ -129,11 +137,23 @@ __METHODS__
    let pendingPreview=model.work
    model.leaveRangePage(); await pendingPreview?.value
    precondition(!model.rangePageOpen && model.rangePreview == nil && !model.busy)
+   for error in [CancellationError(), SyncFailure("retries exhausted"), nil] as [Error?] {
+     let previewOnly = Model(); previewOnly.web.result = scan
+     previewOnly.status = "overview idle"
+     previewOnly.web.retryMessage = "15 秒后重试（1/3）"
+     previewOnly.web.scanError = error
+     previewOnly.previewRange(start:capture,end:capture,photos:true,videos:true)
+     await previewOnly.work?.value
+     precondition(previewOnly.status == "overview idle", "preview left a stale retry message in overview")
+     precondition(previewOnly.rangeStatus != previewOnly.web.retryMessage)
+     precondition(!previewOnly.busy && previewOnly.persisted == 0)
+   }
    print("PASS: preview read-only, selected-only manual import, unrelated queue preserved, session recovery, permission/cancellation")
  }
 }
 '''
 
+harness = harness.replace("__CALLBACK__", extract("      web.onScanMessage = "))
 harness = harness.replace("__METHODS__", "\n".join(extract(s) for s in ["  func leaveRangePage(", "  func clearRangePreview(", "  func previewRange(", "  func importRange(", "  func cancelRangeWork(", "  private func tick("]))
 resume = harness[:harness.index("   let model=Model()")] + r'''
    let fresh=Model(); fresh.web.result=scan; fresh.rangePageOpen=false

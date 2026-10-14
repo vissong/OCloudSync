@@ -58,6 +58,11 @@ import SyncCore
       let saved = defaults.integer(forKey: "scanMinutes")
       intervalMinutes = [5, 15, 30, 60].contains(saved) ? saved : 15
       web.onMessage = { [weak self] message in self?.status = message }
+      web.onScanMessage = { [weak self] message in
+        guard let self else { return }
+        if self.rangePageOpen { self.rangeStatus = message }
+        else { self.status = message }
+      }
       web.downloadProgress.onUpdate = { [weak self] progress in self?.downloadProgress = progress }
       web.diagnosticsURL = root.appendingPathComponent("session-status.json")
       web.onSessionChange = { [weak self] value in
