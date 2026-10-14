@@ -67,11 +67,26 @@ public struct QueueSummary {
 }
 
 extension Ledger {
+  /// Preserve identity and any uncertain PhotoKit transaction; only explicit re-selection resumes it.
+  public mutating func clearImportQueue(now: Date = Date()) {
+    let keys = Set((importBatches ?? []).flatMap(\.recordKeys))
+    for key in Array(records.keys) {
+      guard var record = records[key], ![.baseline,.imported,.duplicate].contains(record.state),
+        keys.contains(key) || [.pending,.downloading,.downloaded,.importing,.failed,.unavailable].contains(record.state)
+      else { continue }
+      record.queueCancelledAt = now
+      record.nextAttempt = nil
+      record.updatedAt = now
+      if record.state != .importing { record.error = nil }
+      records[key] = record
+    }
+    importBatches = []
+  }
   /// Old releases did not save range selections. Preserve only the unfinished work we can prove.
   public mutating func migrateImportQueue(now: Date = Date()) {
     guard importBatches == nil else { return }
     let keys = records.values.filter {
-      [.pending,.downloading,.downloaded,.importing,.failed,.unavailable].contains($0.state)
+      $0.queueCancelledAt == nil && [.pending,.downloading,.downloaded,.importing,.failed,.unavailable].contains($0.state)
     }.sorted { $0.id < $1.id }.map(\.id)
     importBatches = keys.isEmpty ? [] : [ImportBatch(source: .legacy,keys: keys,createdAt: now)]
   }

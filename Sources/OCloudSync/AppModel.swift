@@ -16,6 +16,10 @@ import SyncCore
   @Published var localRecoveryProgress: ImportProgress?
   @Published var importProgressIsRange = false
   @Published var downloadProgress: DownloadProgress?
+  @Published var cacheStatistics: CacheStatistics?
+  @Published var cacheStatisticsBusy = false
+  @Published var clearingCache = false
+  @Published var cacheStatus = ""
   @Published var intervalMinutes = 15
   @Published var rangePreview: DateRangePreview?
   @Published var rangeStatus = "选择拍摄日期并预览，再勾选需要导入的文件"
@@ -87,7 +91,7 @@ import SyncCore
   var baseline: Int { ledger.records.values.filter { $0.state == .baseline }.count }
   var failures: Int {
     ledger.records.values.filter {
-      $0.state == .failed || ($0.state == .importing && $0.error != nil)
+      $0.queueCancelledAt == nil && ($0.state == .failed || ($0.state == .importing && $0.error != nil))
     }.count
   }
   func setEnabled(_ value: Bool) {
@@ -116,6 +120,58 @@ import SyncCore
     }
   }
   func revealCache() { if let cache { NSWorkspace.shared.open(cache) } }
+  var cacheCleanupBlockedReason: String? {
+    if busy { return "请先停止当前任务并等待处理结束" }
+    if ledger.records.values.contains(where: { $0.state == .importing && $0.queueCancelledAt == nil }) {
+      return "有图库导入结果尚待确认的任务，请先核对后再清理缓存"
+    }
+    if fatal != nil { return "请先解决本地台账错误" }
+    return nil
+  }
+  func refreshCacheStatistics() {
+    guard !cacheStatisticsBusy, !clearingCache, let cache else { return }
+    cacheStatisticsBusy = true
+    cacheStatus = ""
+    Task {
+      defer { cacheStatisticsBusy = false }
+      do {
+        cacheStatistics = try await Task.detached(priority: .utility) { try OriginalCache.measure(cache) }.value
+      } catch {
+        cacheStatistics = nil
+        cacheStatus = "无法统计缓存：\(error.localizedDescription)"
+      }
+    }
+  }
+  func clearOriginalCache() {
+    if let reason = cacheCleanupBlockedReason { cacheStatus = reason; return }
+    guard !cacheStatisticsBusy, let cache else { return }
+    busy = true; clearingCache = true; cacheStatistics = nil
+    cacheStatus = "正在清理原文件缓存…"
+    // Once confirmed, drain filesystem cleanup before reopening the pipeline, even if sync is stopped.
+    work = Task {
+      defer { busy = false; clearingCache = false; work = nil }
+      do {
+        let result = try await Task.detached(priority: .utility) { try OriginalCache.clear(cache) }.value
+        cacheStatistics = result.remaining
+        cacheStatus = result.failedEntries == 0 && result.remaining.entryCount == 0
+          ? "原文件缓存已清空；照片图库、查重记录和登录状态已保留"
+          : "部分缓存未能删除（\(result.failedEntries) 项），剩余 \(result.remaining.fileCount) 个文件，可稍后重试"
+      } catch { cacheStatus = "缓存清理未完成：\(error.localizedDescription)" }
+    }
+  }
+  func clearImportQueue() {
+    guard !busy, fatal == nil else { status = "请先停止当前任务并等待处理结束，再清空队列"; return }
+    var changed = ledger
+    changed.clearImportQueue()
+    do {
+      try persist(changed)
+      queueBatchID = nil; importProgress = nil; localRecoveryProgress = nil
+      completed = 0; total = 0
+      clearRangePreview()
+      nextScan = Date().addingTimeInterval(Double(intervalMinutes) * 60)
+      status = "导入队列已清空，剩余任务已取消；导入记录和查重信息已保留"
+    } catch { stopForStorage(error) }
+  }
   func openPhotos() {
     NSWorkspace.shared.openApplication(
       at: URL(fileURLWithPath: "/System/Applications/Photos.app"),

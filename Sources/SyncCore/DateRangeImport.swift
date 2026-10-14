@@ -61,6 +61,8 @@ public struct DateRangePreview: Identifiable, Sendable {
   }
   public func eligibility(_ asset: RemoteAsset, in ledger: Ledger) -> RangeImportEligibility {
     guard asset.supported else { return .unsupported }
+    if let record = ledger.records[asset.key], record.queueCancelledAt != nil,
+      ![.imported,.duplicate].contains(record.state) { return .ready }
     switch ledger.records[asset.key]?.state {
     case .imported?, .duplicate?: return .completed
     case .pending?, .downloading?, .downloaded?, .importing?: return .queued
@@ -96,7 +98,8 @@ extension Ledger {
     for asset in selected {
       var record = records[asset.key] ?? SyncRecord(asset: asset, state: .pending)
       record.asset = asset
-      record.state = .pending
+      if record.state != .importing { record.state = .pending }
+      record.queueCancelledAt = nil
       record.attempts = 0
       record.nextAttempt = nil
       record.error = nil

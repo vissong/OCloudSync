@@ -101,9 +101,11 @@ public struct SyncRecord: Codable, Identifiable, Sendable {
   public var livePhoto: LivePhotoManifest?
   public var staticFallback: StaticFallbackInfo?
   public var videoCompatibility: VideoCompatibilityInfo?
+  public var queueCancelledAt: Date?
   public var duplicateReason: String?
   public var updatedAt = Date()
   public var resultLabel: String {
+    if queueCancelledAt != nil { return "已取消" }
     if state == .imported && videoCompatibility != nil { return "视频已兼容导入" }
     if state == .imported && staticFallback != nil { return "已按静态照片导入" }
     if state == .imported && livePhoto != nil { return "Live Photo 已导入" }
@@ -195,7 +197,7 @@ public struct Ledger: Codable {
       if importBatches == nil { importBatches = [] }
       importBatches?.append(ImportBatch(source: .automatic,keys: newKeys))
     }
-    for a in assets where records[a.key]?.state == .unavailable {
+    for a in assets where records[a.key]?.state == .unavailable && records[a.key]?.queueCancelledAt == nil {
       records[a.key]?.state = a.supported ? .pending : .unsupported
       records[a.key]?.error = nil
     }
@@ -206,6 +208,7 @@ public struct Ledger: Codable {
   }
   public func due(at: Date, account: String? = nil) -> [SyncRecord] {
     records.values.filter { r in
+      guard r.queueCancelledAt == nil else { return false }
       if let account, account != r.asset.account { return false }
       switch r.state {
       case .pending, .downloaded: return true
@@ -240,7 +243,7 @@ public struct Ledger: Codable {
   }
   public mutating func retryFailures() {
     for key in Array(records.keys)
-    where records[key]?.state == .failed || records[key]?.state == .importing {
+    where records[key]?.queueCancelledAt == nil && (records[key]?.state == .failed || records[key]?.state == .importing) {
       records[key]?.attempts = 0
       records[key]?.nextAttempt = Date()
       records[key]?.error = nil

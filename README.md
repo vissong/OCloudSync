@@ -95,7 +95,7 @@
 
 **「已导入图库」只表示 PhotoKit 导入成功。** App 不把它当成服务端备份完成，不显示伪造的逐项 iCloud 上传百分比；请在系统「照片」中查看 iCloud 同步状态。
 
-原始 OPPO 文件不会删除。缓存也不会自动清理，需预留磁盘空间；iCloud 是否有足够容量由系统管理。不要删除同步台账来「重置失败」，否则重新建立基线可能把尚未同步的新增照片视为历史。
+OPPO 云端原件不会删除。本机缓存不会自动清理，需预留磁盘空间；iCloud 是否有足够容量由系统管理。不要删除同步台账来「重置失败」，否则重新建立基线可能把尚未同步的新增照片视为历史。
 
 ## 数据位置
 
@@ -140,3 +140,9 @@ bash scripts/ci.sh
 转换实现参考用户提供的本地 `MotionPhotoFromiPhotos` 项目的 `native/make_livephoto_with_audio.swift`；本程序没有使用其图库数据库修改或替换原照片流程。合成样本验证见 `scripts/test-livephoto.py`，不会访问照片图库。
 
 参考：[Apple WKDownload](https://developer.apple.com/documentation/webkit/wkdownload)、[Apple PhotoKit 文件导入](https://developer.apple.com/documentation/photos/phassetcreationrequest/addresource%28with%3Afileurl%3Aoptions%3A%29)、[OPPO 官方云相册](https://cloud.oppo.com/module.html#/photo)。
+
+## 队列与缓存清理（0.9.0）
+
+「导入队列 → 清空全部队列」移除全部批次并取消剩余任务，保留已导入记录和查重信息。取消的同一版本文件不会在扫描、重试或重启后自动重新排队；需要时可在「按时间导入」重新选择。
+
+「同步概览 → 原文件缓存」显示文件数量和估算磁盘占用，支持刷新、查看文件和清空缓存。清理覆盖原文件、未完成下载、实况及视频兼容副本；不会删除台账、导入回执、登录状态、OPPO 云端或系统照片图库。未完成任务以后需重新下载，云端已删除的文件无法重新获取。运行中需先停止并等待处理结束；存在未取消且未确认的图库事务时先完成核对或清空队列。清理失败会显示剩余文件，不会把部分失败报告为成功。详见 [清理设计与验证](docs/QUEUE-CACHE-CLEANUP.md)。

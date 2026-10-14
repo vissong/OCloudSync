@@ -57,7 +57,7 @@ struct Dashboard: View {
           Label("自动同步新增照片与视频", systemImage: "sparkles")
           Text("关闭窗口后继续运行\n退出 App 后停止同步").font(.caption).foregroundStyle(.secondary)
         }
-        Text("本地版本 0.8.2").font(.caption2).foregroundStyle(.tertiary)
+        Text("本地版本 0.9.0").font(.caption2).foregroundStyle(.tertiary)
       }.padding(24).frame(width: 185).background(Color(nsColor: .controlBackgroundColor))
       Divider()
       VStack(alignment: .leading, spacing: 20) {
@@ -116,6 +116,8 @@ struct Dashboard: View {
           }
           records
         } else {
+          ScrollView {
+          VStack(alignment: .leading, spacing: 20) {
           HStack {
             VStack(alignment: .leading, spacing: 6) {
               Text("让原图，自动抵达。").font(.system(size: 30, weight: .semibold))
@@ -188,10 +190,11 @@ struct Dashboard: View {
             ).font(
               .caption
             ).foregroundStyle(.secondary)
-            Spacer()
-            Button("查看原文件缓存") { model.revealCache() }
+
           }
-          Spacer(minLength: 0)
+          CacheManagementView(model: model)
+          }
+          }
         }
       }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity)
     }

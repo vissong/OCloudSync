@@ -5,6 +5,7 @@ struct ImportQueueView: View {
   @ObservedObject var model: AppModel
   @State private var filter: QueueFilter = .all
   @State private var search = ""
+  @State private var confirmClear = false
 
   var body: some View {
     let batches = (model.ledger.importBatches ?? []).sorted { $0.createdAt > $1.createdAt }
@@ -25,7 +26,12 @@ struct ImportQueueView: View {
           Button("重试全部失败任务") { model.retry() }.disabled(model.failures == 0 || model.fatal != nil)
         }
       }
-      Text("文件清单和处理结果保存在这台 Mac，退出重开后可继续查看。")
+      HStack {
+        Text("文件清单和处理结果保存在这台 Mac，退出重开后可继续查看。")
+        Spacer()
+        Button("清空全部队列", role: .destructive) { confirmClear = true }
+          .disabled(model.busy || model.fatal != nil || batches.isEmpty)
+      }
         .foregroundStyle(.secondary)
       VStack(alignment: .leading,spacing: 6) {
         Text(model.fatal ?? model.status)
@@ -100,6 +106,12 @@ struct ImportQueueView: View {
             .foregroundStyle(.secondary)
         }
       }
+    }
+    .alert("清空全部导入队列？", isPresented: $confirmClear) {
+      Button("取消", role: .cancel) {}
+      Button("清空队列", role: .destructive) { model.clearImportQueue() }
+    } message: {
+      Text("将移除所有批次清单并取消剩余任务。已导入的照片、视频及查重记录会保留；原文件缓存不会删除。取消的文件不会自动重新入队，可在“按时间导入”中重新选择。")
     }
   }
 }
