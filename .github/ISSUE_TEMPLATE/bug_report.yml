@@ -1,0 +1,37 @@
+name: Bug 报告
+description: 报告可复现问题（请先脱敏）
+body:
+  - type: markdown
+    attributes:
+      value: "安全漏洞请按 SECURITY.md 私下报告。不要上传 Cookie、台账、回执、网络抓包或私人原片；请用合成样本复现。"
+  - type: input
+    id: version
+    attributes:
+      label: App 版本或提交
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: macOS 版本和芯片架构
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤与预期/实际结果
+      description: 如涉及媒体，请说明容器、编码、是否实况；不要提供私人文件名或内容。
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: 已脱敏的错误信息
+      description: 仅提供必要片段，不上传整个数据目录或包含私人路径的日志。
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我已移除账号、凭据、私人元数据和原片。
+          required: true

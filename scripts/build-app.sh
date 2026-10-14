@@ -12,6 +12,7 @@ cp "$BIN_DIR/OCloudLivePhoto" "$APP/Contents/MacOS/OCloudLivePhoto"
 codesign --force --sign - "$APP/Contents/MacOS/OCloudLivePhoto"
 # Bundle resources live in Contents/Resources for a sealed macOS app.
 ditto "$BIN_DIR/OCloudSync_OCloudSync.bundle" "$APP/Contents/Resources/OCloudSync_OCloudSync.bundle"
+cp "$PROJECT_DIR/LICENSE" "$PROJECT_DIR/NOTICE.md" "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

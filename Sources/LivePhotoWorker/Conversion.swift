@@ -2,7 +2,7 @@ import AVFoundation
 import Foundation
 import ImageIO
 import PhotosUI
-// Adapted from the user-provided MotionPhotoFromiPhotos native converter.
+// Adapted from the author’s MotionPhotoFromiPhotos converter; see NOTICE.md.
 import SyncCore
 import UniformTypeIdentifiers
 

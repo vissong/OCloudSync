@@ -11,3 +11,16 @@ dist/
 ledger.json
 session-status.json
 last-check.json
+
+# Runtime data and diagnostic exports must remain outside source control.
+originals/
+imports/
+date-repairs/
+*.part.*
+*.photoslibrary/
+*.har
+*.p12
+*.pfx
+*.key
+# Scan reports can contain sensitive metadata even when findings are redacted.
+gitleaks-report.*

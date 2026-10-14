@@ -8,7 +8,7 @@
 
 1. Swift 核心状态、分页、重试和 Live Photo 单元测试。
 2. 网页桥接与会话适配器模拟测试、扫描取消离线回归。
-3. Release 构建与 ad-hoc 签名验证。
+3. Release 构建与 ad-hoc 签名验证，核对 App 内附带的 MIT 许可证及来源说明。
 4. 使用现场生成的合成素材验证 Live Photo 转换、音轨及封面时间、缓存复用、损坏恢复与截断拒绝。
 5. 核对二进制架构，生成 `OCloudSync-macOS-arm64.zip` 和 `SHA256SUMS`。
 
@@ -28,4 +28,10 @@ bash scripts/ci.sh
 
 CI 只覆盖离线测试与打包。官方登录、真实云相册下载、PhotoKit 权限及 iCloud 同步仍需在用户 Mac 上验证。
 
-首次接入已在本地完整执行上述脚本，45 项 Swift 测试及全部脚本测试通过，ZIP 完整性、架构和签名校验通过；独立审查无问题。远端结果见 [Actions 构建记录](https://github.com/vissong/OCloudSync/actions/workflows/build.yml)。
+构建结果以对应提交的 [Actions 记录](https://github.com/vissong/OCloudSync/actions/workflows/build.yml) 为准。
+
+## 秘密扫描
+
+独立的 `secrets.yml` 工作流在 push、PR 和手动运行时执行。使用 Ubuntu 托管 runner、只读权限和完整 Git 历史，下载 Gitleaks 8.30.1 官方发行包并核验固定 SHA-256；无需账号秘密或 Gitleaks 商业 action 授权。
+
+先在临时仓库验证检出、输出脱敏和浅克隆拒绝，再扫描所有已获取引用的完整历史。失败不会被忽略，不上传可能含私人元数据的扫描报告。运行方式见 [贡献指南](../CONTRIBUTING.md)。GitHub 原生 Secret scanning / Push protection 与此 CI 是独立功能，需在仓库设置核对启用状态。
