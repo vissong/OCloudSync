@@ -22,9 +22,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>OCloudSync</string>
 <key>CFBundleDisplayName</key><string>OPPO 照片同步</string>
 <key>CFBundleIconFile</key><string>OCloudSync.icns</string>
+<key>CFBundleIconName</key><string>OCloudSync</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.9.2</string>
-<key>CFBundleVersion</key><string>18</string>
+<key>CFBundleShortVersionString</key><string>0.9.3</string>
+<key>CFBundleVersion</key><string>19</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSPhotoLibraryUsageDescription</key><string>读取原片以核对重复文件，并将你选择同步的 OPPO 新增照片和视频导入系统照片图库。</string>

@@ -25,6 +25,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     name: Test release source without credentials
     runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     timeout-minutes: 25
     outputs:
       artifact_id: ${{ steps.input.outputs.artifact-id }}

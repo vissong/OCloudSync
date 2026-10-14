@@ -2,7 +2,7 @@
 
 工作流：`.github/workflows/build.yml`，名称为 **Build macOS App**。
 
-推送、Pull Request 及 Actions 页的 **Run workflow** 都会触发。使用标准 `macos-15` Apple Silicon runner，Node.js 24，Swift / Python 使用 runner 预装版本并打印到日志。官方 Actions 固定到具体 commit；工作流只有 `contents: read` 权限。相同分支的新构建取消旧构建，单次上限 25 分钟。
+推送、Pull Request 及 Actions 页的 **Run workflow** 都会触发。使用标准 `macos-15` Apple Silicon runner，显式选择 Xcode 26.3（默认 Xcode 16.4 无法编译 Icon Composer 格式），Node.js 24，Swift / Python 使用 runner 预装版本并打印到日志。官方 Actions 固定到具体 commit；工作流只有 `contents: read` 权限。相同分支的新构建取消旧构建，单次上限 25 分钟。
 
 ## 验证及产物
 
@@ -16,11 +16,15 @@
 
 构建不登录 OPPO、不读取个人图库，也不启动同步 App。无需配置账号、Cookie、Apple ID 或开发者证书。合成转换测试不向照片图库写入内容。产物采用本地 ad-hoc 签名，未经过 Developer ID 签名或 Apple 公证；不是公开分发安装包。
 
-应用图标原图为 `assets/AppIcon.png`，由内置 imagegen 生成，提示词保存在 `assets/AppIcon.prompt.txt`。`build-app.sh` 调用 `build-icon.sh`，使用 macOS 自带的 `sips` 和 `iconutil` 生成 16–1024 像素的图标资源，写入 App 的 `Contents/Resources/OCloudSync.icns`，并通过 `CFBundleIconFile` 设置应用图标。构建时不调用图像生成服务。
+应用图标原图为 `assets/AppIcon.png`（1024 × 1024、不透明、满版方形），由内置 imagegen 生成后等比缩放，提示词保存在 `assets/AppIcon.prompt.txt`。根据 [Apple 图标规范](https://developer.apple.com/design/human-interface-guidelines/app-icons/)，输入素材不预裁圆角、不留透明边框，圆角和最终留白交给系统处理。
+
+`build-icon.sh` 将 PNG 与 `assets/AppIcon.icon.json` 装配为临时 `.icon` 文档，通过 Xcode 26+ 的 `actool` 编译，输出包含原生 `IconImageStack` 的 `Assets.car`，并生成适用于旧系统的完整 16–1024 像素 ICNS。图案使用单个不透明位图层，关闭前景玻璃和阴影以保留扁平风格；没有手绘矢量素材。Info.plist 同时设置 `CFBundleIconName` 和 `CFBundleIconFile`。仅把旧图转换成 `.appiconset` 不会修正素材中的双层底板。
+
+CI 的 `validate-app-icon.py` 检查实际编译产物中的原生图标栈、不透明 1024 像素图层、Info.plist 引用和 10 个 ICNS 尺寸。构建不调用图像生成服务。Apple 的[图标编译说明](https://developer.apple.com/documentation/xcode/creating-your-app-icon-using-icon-composer)说明编译器会生成旧系统兼容图；这不替代各系统上的 Dock 实测。发布前应启动最终 App，在 Dock 中检查大小、单层底板及小尺寸辨识度，不能只凭 Finder“显示简介”判断。
 
 ## 本地复现
 
-在 macOS 安装 Xcode Command Line Tools、Node.js 和 Python 3 后：
+在 macOS 安装并选中完整 Xcode 26+、安装 Node.js 和 Python 3 后：
 
 ```sh
 bash scripts/ci.sh

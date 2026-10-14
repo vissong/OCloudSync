@@ -32,6 +32,7 @@ APP="$OUTPUT_DIR/OCloudSync.app"
 # Redistributed App bundles must carry the source license and provenance.
 cmp "$PROJECT_DIR/LICENSE" "$APP/Contents/Resources/LICENSE"
 cmp "$PROJECT_DIR/NOTICE.md" "$APP/Contents/Resources/NOTICE.md"
+python3 "$PROJECT_DIR/scripts/validate-app-icon.py" "$APP"
 python3 "$PROJECT_DIR/scripts/test-livephoto.py" "$APP/Contents/MacOS/OCloudLivePhoto"
 test "$(lipo -archs "$APP/Contents/MacOS/OCloudSync")" = "$BUILD_ARCH"
 test "$(lipo -archs "$APP/Contents/MacOS/OCloudLivePhoto")" = "$BUILD_ARCH"

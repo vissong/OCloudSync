@@ -1,0 +1,18 @@
+{
+  "fill": "none",
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "Artwork.png",
+          "name": "OCloudSync",
+          "glass": false
+        }
+      ],
+      "shadow": { "kind": "none", "opacity": 0 },
+      "translucency": { "enabled": false, "value": 0 },
+      "specular": false
+    }
+  ],
+  "supported-platforms": { "squares": "shared" }
+}

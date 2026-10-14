@@ -25,7 +25,7 @@
 
 ## 从源码构建
 
-安装 Xcode Command Line Tools（提供 Swift 5.9+）后，在终端执行：
+安装完整 Xcode 26+（图标使用 Icon Composer 格式），并将命令行工具指向该 Xcode 后，在终端执行：
 
 ```sh
 git clone https://github.com/vissong/OCloudSync.git

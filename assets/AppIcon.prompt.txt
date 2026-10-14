@@ -1,11 +1,8 @@
-Generation mode: built-in image_gen tool; transparent_background=true.
-Final generation informed by the user's macOS Dock reference: subtly shaded pale base plate, flat interior artwork.
-Original generated raster retained without design edits. macOS icon packaging only rescales the raster.
+Generation mode: built-in image_gen tool; transparent_background=false.
+The generated raster was resized proportionally to 1024 x 1024 with sips. Native actool handles masking and packaging.
 
-Use case: logo-brand.
-Make one clean professional macOS app icon for OCloudSync.
-Shape: perfectly smooth rounded-square tile centered on transparent canvas, 12 percent transparent padding on all four sides, generous corner radius.
-Tile material: very light COOL GRAY pearl finish, a gentle vertical tonal shift from #F4F6F8 at the top to #DFE5EC at the bottom. Subtle inner edge highlight. Not uniform white. NO exterior shadow, NO glow, NO floating pixels or particles. All depth is inside the tile contour.
-Central artwork: FLAT solid forest-green pair of curved synchronization arrows surrounding a simple pale mint cloud. Inside the cloud are two flat green mountain shapes and a small golden-yellow sun circle. Generous white-space between the arrows and cloud. Geometric, balanced, crisp edges. Plain solid color fills for all symbols, no internal gradients, no bevel, no relief, no glossy materials.
-Only the pale gray tile has subtle shading. It should fit naturally beside polished macOS Dock icons. Entire tile and all artwork fully opaque. Everything outside the single smooth rounded-square silhouette fully transparent, clean alpha edge. No thin white fringes.
-One icon, front view, no text, no logos belonging to other companies, no mockup, no extra decorations, no grid. Raster PNG.
+Use case: precise-object-edit
+Asset type: production macOS app icon SOURCE ARTWORK, a single full-bleed raster PNG.
+Input image is the existing OCloudSync icon, the edit target. Preserve its identity: two dark green clockwise circular sync arrows surrounding a pale mint cloud with two green mountain peaks and a golden yellow sun. Keep these internal shapes flat, crisp, simple, centered, and symmetrical; no lettering.
+Change the icon canvas to meet Apple's modern icon production requirements: output a 1024 by 1024 square image with fully opaque pixels ALL THE WAY to all four edges and all four SQUARE corners. The entire canvas IS the pale pearl-grey background, gently changing from #F4F6F8 at top to #DFE5EC at bottom. It must not be pure white. Enlarge the green motif to approximately 72 percent of canvas width and height, centered, with about 14 percent breathing space within the background.
+REMOVE the pre-rounded square tile silhouette, transparent margin, outline, bevel, rim, reflection, drop shadow, edge flecks, and any separate inset panel. NO rounded corners at all. NO tile floating in space. NO inner white square. NO external background. NO transparency. This is raw square source artwork, not a mockup or finished OS-masked icon; macOS will apply its own mask. Preserve the symbol colors and composition, but use perfectly flat solid colors on all foreground shapes.

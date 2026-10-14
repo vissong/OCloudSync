@@ -16,6 +16,8 @@ jobs:
   build:
     name: Test and package (Apple Silicon)
     runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     timeout-minutes: 25
     steps:
       - name: Check out source

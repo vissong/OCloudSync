@@ -4,7 +4,7 @@
 
 ## 环境和验证
 
-开发需要 macOS、Xcode Command Line Tools / Swift 5.9+；完整回归另需 Node.js 24、Python 3。App 无第三方 Swift 包依赖。
+开发需要 macOS、完整 Xcode 26+（App 图标使用 Icon Composer 格式，由 `actool` 编译）；完整回归另需 Node.js 24、Python 3。App 无第三方 Swift 包依赖。
 
 ```sh
 swift test
