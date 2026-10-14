@@ -1,0 +1,11 @@
+Generation mode: built-in image_gen tool; transparent_background=true.
+Final generation informed by the user's macOS Dock reference: subtly shaded pale base plate, flat interior artwork.
+Original generated raster retained without design edits. macOS icon packaging only rescales the raster.
+
+Use case: logo-brand.
+Make one clean professional macOS app icon for OCloudSync.
+Shape: perfectly smooth rounded-square tile centered on transparent canvas, 12 percent transparent padding on all four sides, generous corner radius.
+Tile material: very light COOL GRAY pearl finish, a gentle vertical tonal shift from #F4F6F8 at the top to #DFE5EC at the bottom. Subtle inner edge highlight. Not uniform white. NO exterior shadow, NO glow, NO floating pixels or particles. All depth is inside the tile contour.
+Central artwork: FLAT solid forest-green pair of curved synchronization arrows surrounding a simple pale mint cloud. Inside the cloud are two flat green mountain shapes and a small golden-yellow sun circle. Generous white-space between the arrows and cloud. Geometric, balanced, crisp edges. Plain solid color fills for all symbols, no internal gradients, no bevel, no relief, no glossy materials.
+Only the pale gray tile has subtle shading. It should fit naturally beside polished macOS Dock icons. Entire tile and all artwork fully opaque. Everything outside the single smooth rounded-square silhouette fully transparent, clean alpha edge. No thin white fringes.
+One icon, front view, no text, no logos belonging to other companies, no mockup, no extra decorations, no grid. Raster PNG.

@@ -12,6 +12,7 @@ cp "$BIN_DIR/OCloudLivePhoto" "$APP/Contents/MacOS/OCloudLivePhoto"
 # Bundle resources live in Contents/Resources for a sealed macOS app.
 ditto "$BIN_DIR/OCloudSync_OCloudSync.bundle" "$APP/Contents/Resources/OCloudSync_OCloudSync.bundle"
 cp "$PROJECT_DIR/LICENSE" "$PROJECT_DIR/NOTICE.md" "$APP/Contents/Resources/"
+bash "$PROJECT_DIR/scripts/build-icon.sh" "$PROJECT_DIR/assets/AppIcon.png" "$APP/Contents/Resources/OCloudSync.icns"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -20,9 +21,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>dev.local.ocloudsync</string>
 <key>CFBundleName</key><string>OCloudSync</string>
 <key>CFBundleDisplayName</key><string>OPPO 照片同步</string>
+<key>CFBundleIconFile</key><string>OCloudSync.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.9.1</string>
-<key>CFBundleVersion</key><string>17</string>
+<key>CFBundleShortVersionString</key><string>0.9.2</string>
+<key>CFBundleVersion</key><string>18</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSPhotoLibraryUsageDescription</key><string>读取原片以核对重复文件，并将你选择同步的 OPPO 新增照片和视频导入系统照片图库。</string>

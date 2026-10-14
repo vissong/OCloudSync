@@ -16,6 +16,8 @@
 
 构建不登录 OPPO、不读取个人图库，也不启动同步 App。无需配置账号、Cookie、Apple ID 或开发者证书。合成转换测试不向照片图库写入内容。产物采用本地 ad-hoc 签名，未经过 Developer ID 签名或 Apple 公证；不是公开分发安装包。
 
+应用图标原图为 `assets/AppIcon.png`，由内置 imagegen 生成，提示词保存在 `assets/AppIcon.prompt.txt`。`build-app.sh` 调用 `build-icon.sh`，使用 macOS 自带的 `sips` 和 `iconutil` 生成 16–1024 像素的图标资源，写入 App 的 `Contents/Resources/OCloudSync.icns`，并通过 `CFBundleIconFile` 设置应用图标。构建时不调用图像生成服务。
+
 ## 本地复现
 
 在 macOS 安装 Xcode Command Line Tools、Node.js 和 Python 3 后：
