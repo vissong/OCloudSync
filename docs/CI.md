@@ -2,7 +2,9 @@
 
 工作流：`.github/workflows/build.yml`，名称为 **Build macOS App**。
 
-推送、Pull Request 及 Actions 页的 **Run workflow** 都会触发。使用标准 `macos-15` Apple Silicon runner，显式选择 Xcode 26.3（默认 Xcode 16.4 无法编译 Icon Composer 格式），Node.js 24，Swift / Python 使用 runner 预装版本并打印到日志。官方 Actions 固定到具体 commit；工作流只有 `contents: read` 权限。相同分支的新构建取消旧构建，单次上限 25 分钟。
+推送、Pull Request 及 Actions 页的 **Run workflow** 都会触发。使用标准 `macos-26` Apple Silicon runner，显式选择 Xcode 26.6，Node.js 24，Swift / Python 使用 runner 预装版本并打印到日志。可用工具链见 [GitHub runner 清单](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md)。官方 Actions 固定到具体 commit；工作流只有 `contents: read` 权限。相同分支的新构建取消旧构建，单次上限 25 分钟。
+
+构建机要求 macOS 26+：macOS 15 即使使用 Xcode 26 编译，系统 `assetutil` 仍不能正确读取新格式的 `IconImageStack`，会报告 `couldn't materialize rendition`，无法完成图标验证。构建与签名 job 均使用新系统，最终分发 ZIP 解压后再次校验图标。App 的部署目标仍为 macOS 13，与构建机要求不同。
 
 ## 验证及产物
 
@@ -24,7 +26,7 @@ CI 的 `validate-app-icon.py` 检查实际编译产物中的原生图标栈、�
 
 ## 本地复现
 
-在 macOS 安装并选中完整 Xcode 26+、安装 Node.js 和 Python 3 后：
+在 macOS 26+ 安装并选中完整 Xcode 26+、安装 Node.js 和 Python 3 后：
 
 ```sh
 bash scripts/ci.sh

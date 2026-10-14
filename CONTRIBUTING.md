@@ -4,7 +4,7 @@
 
 ## 环境和验证
 
-开发需要 macOS、完整 Xcode 26+（App 图标使用 Icon Composer 格式，由 `actool` 编译）；完整回归另需 Node.js 24、Python 3。App 无第三方 Swift 包依赖。
+完整构建需要 macOS 26+、完整 Xcode 26+（编译及检查 Icon Composer 图标）；完整回归另需 Node.js 24、Python 3。生成的 App 仍支持 macOS 13+，无第三方 Swift 包依赖。
 
 ```sh
 swift test

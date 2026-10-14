@@ -4,6 +4,11 @@ if [ "$#" -ne 2 ] || [ ! -f "$1" ]; then
   echo 'Usage: build-icon.sh source.png output.icns' >&2; exit 2
 fi
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+MACOS_MAJOR="$(sw_vers -productVersion | cut -d . -f 1)"
+if [ "$MACOS_MAJOR" -lt 26 ]; then
+  echo 'App icon compilation and validation require a macOS 26+ build host; the App still targets macOS 13+.' >&2
+  exit 1
+fi
 XCODE_MAJOR="$(xcodebuild -version | awk '/^Xcode / { split($2, v, "."); print v[1] }')"
 if [ "${XCODE_MAJOR:-0}" -lt 26 ]; then
   echo 'App icon compilation requires Xcode 26 or later; select it with DEVELOPER_DIR or xcode-select.' >&2

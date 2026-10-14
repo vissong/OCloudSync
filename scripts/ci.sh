@@ -6,6 +6,8 @@ BUILD_DIR="${OCLOUD_BUILD_DIR:-$PROJECT_DIR/.build}"
 OUTPUT_DIR="${OCLOUD_OUTPUT_DIR:-$PROJECT_DIR/dist}"
 BUILD_ARCH="$(uname -m)"
 
+sw_vers
+xcodebuild -version
 swift --version
 node --version
 python3 --version

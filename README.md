@@ -25,7 +25,7 @@
 
 ## 从源码构建
 
-安装完整 Xcode 26+（图标使用 Icon Composer 格式），并将命令行工具指向该 Xcode 后，在终端执行：
+源码构建需要 macOS 26+ 和完整 Xcode 26+（编译及检查 Icon Composer 图标）；生成的 App 仍支持 macOS 13+。将命令行工具指向该 Xcode 后，在终端执行：
 
 ```sh
 git clone https://github.com/vissong/OCloudSync.git
