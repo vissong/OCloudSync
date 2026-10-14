@@ -75,6 +75,16 @@ class ReleaseTests(unittest.TestCase):
         pack = max(i for i,c in enumerate(self.calls) if c[0] == "ditto")
         self.assertLess(gate, pack)
 
+    def test_explicit_ci_keychain_used_for_all_apple_requests(self):
+        with patch.object(release.subprocess, "run", side_effect=self.fake_run):
+            release.release(self.app, "ci-profile", self.output, keychain=Path("/tmp/ci.keychain-db"), wait_seconds=1200)
+        for command in self.calls:
+            if command[:2] == ["xcrun", "notarytool"]:
+                self.assertIn("--keychain", command)
+                self.assertEqual(command[command.index("--keychain") + 1], "/tmp/ci.keychain-db")
+        wait = next(c for c in self.calls if c[:3] == ["xcrun", "notarytool", "wait"])
+        self.assertIn("1200s", wait)
+
     def test_adhoc_never_uploaded(self):
         self.adhoc = True
         with self.assertRaises(subprocess.CalledProcessError): self.execute()

@@ -25,7 +25,12 @@ def verify(app):
             raise RuntimeError("Developer ID signing must enable hardened runtime and a secure timestamp.")
 
 
-def release(app, profile, output, resume=False):
+def release(app, profile, output, resume=False, keychain=None, wait_seconds=60):
+    credentials = ["--keychain-profile", profile]
+    if keychain:
+        credentials += ["--keychain", str(keychain)]
+    if not 1 <= wait_seconds <= 1800:
+        raise ValueError("Wait duration must be between 1 and 1800 seconds.")
     # A fresh directory protects existing releases; resume never submits again.
     if not resume:
         output.mkdir(parents=True, exist_ok=False)
@@ -46,24 +51,24 @@ def release(app, profile, output, resume=False):
             # Preserve an interrupted response. Never infer that a failed upload was not accepted.
             print("Submitting signed App to Apple; waiting for a submission ID...", flush=True)
             result = run(["xcrun", "notarytool", "submit", str(upload),
-                          "--keychain-profile", profile, "--output-format", "json"])
+                          *credentials, "--output-format", "json"])
             submission.write_text(result)
         if not submission.exists():
             raise RuntimeError("No saved submission ID. Check notarytool history before retrying an uncertain upload.")
         submission_id = str(uuid.UUID(json.loads(submission.read_text())["id"]))
         verify(staged)
-        print(f"Submission: {submission_id}. Waiting up to 60 seconds; resume if still processing.", flush=True)
+        print(f"Submission: {submission_id}. Waiting up to {wait_seconds} seconds; resume if still processing.", flush=True)
         try:
-            run(["xcrun", "notarytool", "wait", submission_id, "--keychain-profile", profile,
-                 "--timeout", "60s"])
+            run(["xcrun", "notarytool", "wait", submission_id, *credentials,
+                 "--timeout", f"{wait_seconds}s"])
         except subprocess.CalledProcessError:
             pass  # Timeout or service error: info below must independently confirm Accepted.
         result = run(["xcrun", "notarytool", "info", submission_id,
-                      "--keychain-profile", profile, "--output-format", "json"])
+                      *credentials, "--output-format", "json"])
         (output / "status.json").write_text(result)
         status = json.loads(result)["status"]
         if status in ("Accepted", "Invalid", "Rejected"):
-            run(["xcrun", "notarytool", "log", submission_id, "--keychain-profile", profile,
+            run(["xcrun", "notarytool", "log", submission_id, *credentials,
                  str(output / "notary-log.json")])
         if status != "Accepted":
             raise RuntimeError(f"Notarization status: {status}. No distribution archive created. Use --resume for pending submissions.")
@@ -94,9 +99,11 @@ def main():
     parser.add_argument("--profile", required=True, help="notarytool Keychain profile name")
     parser.add_argument("--output", required=True, type=Path, help="New output directory, or existing one with --resume")
     parser.add_argument("--resume", action="store_true", help="Wait for the saved submission; do not upload again")
+    parser.add_argument("--keychain", type=Path, help="Explicit temporary keychain for CI")
+    parser.add_argument("--wait-seconds", type=int, default=60, help="Apple processing wait, at most 1800 seconds")
     args = parser.parse_args()
     try:
-        release(args.app.resolve(), args.profile, args.output.resolve(), args.resume)
+        release(args.app.resolve(), args.profile, args.output.resolve(), args.resume, args.keychain, args.wait_seconds)
     except (RuntimeError, OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         if isinstance(error, subprocess.CalledProcessError) and error.stdout:
             print(error.stdout, file=sys.stderr)

@@ -68,3 +68,5 @@ Actions 的成功构建也提供 ZIP 和 SHA-256 校验文件，保留 14 天，
 ## 许可证与来源
 
 [MIT License](LICENSE)，Copyright (c) 2026 Vissong。实况转换部分改编自作者的私有 MotionPhotoFromiPhotos 项目；其独立仓库无需公开即可构建本项目，详见 [代码来源](NOTICE.md)。
+
+正式签名与 Apple 公证发布流程见[签名与公证](docs/SIGNING.md)。普通构建 CI 工件仍为未公证测试版；正式安装包以 Release 附件为准。

@@ -1,0 +1,175 @@
+name: Release signed macOS App
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'App version tag, for example v0.9.0 (must be unused)'
+        required: true
+        type: string
+      publish:
+        description: 'Publish immediately instead of creating a draft Release'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ocloud-production-release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: github.ref == 'refs/heads/main'
+    name: Test release source without credentials
+    runs-on: macos-15
+    timeout-minutes: 25
+    outputs:
+      artifact_id: ${{ steps.input.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Test and build
+        env:
+          OCLOUD_BUILD_DIR: ${{ runner.temp }}/ocloud-build
+          OCLOUD_OUTPUT_DIR: ${{ github.workspace }}/dist
+        run: bash scripts/ci.sh
+      - name: Check version and refuse existing tag or release
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/validate-release.py dist/OCloudSync.app "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
+      - name: Save tested input (not a distribution build)
+        id: input
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned-release-input-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/OCloudSync-macOS-arm64.zip
+            dist/SHA256SUMS
+          retention-days: 3
+          if-no-files-found: error
+
+  sign:
+    name: Developer ID sign and Apple notarize
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    environment: release
+    runs-on: macos-15
+    timeout-minutes: 40
+    outputs:
+      artifact_id: ${{ steps.distribution.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.test.outputs.artifact_id }}
+          path: dist/input
+          merge-multiple: true
+      - name: Verify and extract tested App
+        run: |
+          cd dist/input
+          shasum -a 256 -c SHA256SUMS
+          ditto -x -k OCloudSync-macOS-arm64.zip ../signed
+      - name: Prepare temporary signing keychain
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: python3 scripts/ci-signing-keychain.py
+      - name: Sign tested App and validate Live Photo helper
+        run: |
+          bash scripts/sign-app.sh dist/signed/OCloudSync.app
+          python3 scripts/test-livephoto.py dist/signed/OCloudSync.app/Contents/MacOS/OCloudLivePhoto
+      - name: Notarize, staple and verify Gatekeeper
+        id: notarize
+        run: |
+          python3 scripts/notarize-app.py dist/signed/OCloudSync.app \
+            --profile OCloudSync-release --keychain "$OCLOUD_KEYCHAIN_PATH" \
+            --output dist/notarized --wait-seconds 1200
+      - name: Verify final distribution ZIP after extraction
+        run: |
+          cd dist/notarized
+          shasum -a 256 -c SHA256SUMS
+          ditto -x -k OCloudSync-macOS-arm64.zip "$RUNNER_TEMP/distribution-check"
+          APP="$RUNNER_TEMP/distribution-check/OCloudSync.app"
+          codesign --verify --deep --strict "$APP"
+          xcrun stapler validate "$APP"
+          spctl --assess --type execute --verbose=2 "$APP"
+      - name: Save notarized distribution
+        id: distribution
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OCloudSync-notarized-${{ inputs.tag }}-${{ github.run_id }}
+          path: |
+            dist/notarized/OCloudSync-macOS-arm64.zip
+            dist/notarized/SHA256SUMS
+          retention-days: 14
+          if-no-files-found: error
+          compression-level: 0
+      - name: Preserve uncertain submission for manual recovery
+        id: recovery
+        if: failure() && steps.notarize.outcome == 'failure'
+        run: ditto -c -k --sequesterRsrc --keepParent dist/notarized "$RUNNER_TEMP/notary-recovery.zip"
+      - name: Save recovery data (not for distribution)
+        if: failure() && steps.recovery.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: NOT-FOR-DISTRIBUTION-notary-recovery-${{ github.run_id }}
+          path: ${{ runner.temp }}/notary-recovery.zip
+          retention-days: 7
+          if-no-files-found: error
+      - name: Remove temporary signing keychain
+        if: always()
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/OCloudSync-signing.keychain-db"
+          if [ -f "$KEYCHAIN" ]; then security delete-keychain "$KEYCHAIN"; fi
+          rm -f "$RUNNER_TEMP/OCloudSync-signing.p12"
+
+  publish:
+    name: Create GitHub Release from verified distribution
+    needs: sign
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.sign.outputs.artifact_id }}
+          path: dist
+          merge-multiple: true
+      - name: Recheck release destination and create release
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          PUBLISH: ${{ inputs.publish }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum -c SHA256SUMS
+          unzip -q OCloudSync-macOS-arm64.zip -d "$RUNNER_TEMP/version-check"
+          python3 ../scripts/validate-release.py "$RUNNER_TEMP/version-check/OCloudSync.app" "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          Developer ID signed and Apple notarized macOS App (Apple Silicon, macOS 13+).
+          Built from commit $GITHUB_SHA. The App includes its notarization ticket and passed Gatekeeper verification.
+
+          Download OCloudSync-macOS-arm64.zip and verify it using SHA256SUMS.
+          This is an independent, unofficial project. Review the README before your first import.
+          EOF
+          ARGS=(release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "OCloudSync $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md")
+          if [ "$PUBLISH" != true ]; then ARGS+=(--draft); fi
+          gh "${ARGS[@]}" OCloudSync-macOS-arm64.zip SHA256SUMS

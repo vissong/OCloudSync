@@ -1,6 +1,6 @@
 # Developer ID 签名与 Apple 公证
 
-公开下载的 App 使用 Developer ID Application 证书签名，再向 Apple 提交公证。默认 CI 仍是无私钥的 ad-hoc 测试构建；正式产物由维护者在持有证书的 Mac 上生成，不向普通 PR 工作流提供证书。
+公开下载的 App 使用 Developer ID Application 证书签名，再向 Apple 提交公证。默认 CI 仍是无私钥的 ad-hoc 测试构建；正式产物可在持有证书的 Mac 或独立的 GitHub 发布流程中生成，不向普通 PR 工作流提供证书。
 
 ## 本机准备
 
@@ -53,3 +53,33 @@ python3 scripts/notarize-app.py dist/signed/OCloudSync.app \
 转换为正式签名时，macOS 可能重新请求钥匙串和照片权限。保留数据并有序退出旧 App 后再切换。正常“从互联网下载，是否打开”的首次确认仍可能出现。
 
 官方参考：[证书](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/)、[公证流程](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)、[App 专用密码](https://support.apple.com/102654)。
+
+## GitHub 正式发布
+
+工作流 **Release signed macOS App**（`release.yml`）只允许在 `main` 手动运行。先执行无凭据的完整测试；签名 job 下载该次运行的测试产物，以 Developer ID 重新签名并提交 Apple；独立的发布 job 只有 GitHub Release 写权限，没有 Apple 凭据。第三方 Actions 固定提交 SHA。
+
+仓库 Settings → Environments 中需有 `release` 环境，Deployment branches and tags 只允许 **main 分支**，不允许通配符或同名 Tag。将以下五项保存为该环境的 Secrets，而非普通仓库 Secrets：
+
+| Secret | 内容 |
+| --- | --- |
+| `APPLE_CERTIFICATE_BASE64` | 包含证书及私钥的加密 `.p12` 的 Base64 |
+| `APPLE_CERTIFICATE_PASSWORD` | `.p12` 导出密码 |
+| `APPLE_ID` | 公证使用的 Apple 账号 |
+| `APPLE_APP_PASSWORD` | Apple App 专用密码，建议专供 GitHub 公证 |
+| `APPLE_TEAM_ID` | 证书所属团队 ID |
+
+本机交互配置工具会先核对环境限制和 `.p12`，再隐藏输入密码并通过 `gh` 标准输入上传。只在自己的终端运行，不把密码提供给聊天或 shell 参数：
+
+```sh
+python3 scripts/configure-release-secrets.py \
+  --p12 "$HOME/Downloads/OCloudSync-DeveloperID.p12" \
+  --repo OWNER/OCloudSync --team-id YOUR_TEAM_ID
+```
+
+`.cer` 不包含私钥。应从“钥匙串访问 → 登录 → 我的证书”导出证书及其私钥为 `.p12`。CI 使用临时钥匙串，不修改本机钥匙串；导入只允许代码签名工具访问，验证凭据后销毁导出文件，job 结束时清理临时钥匙串。受信任的 main 代码能够使用这些凭据，因此合入 main 前应审查工作流和发布脚本。
+
+在 Actions 中打开 **Release signed macOS App → Run workflow**，分支选 `main`，Tag 填与 App 内版本一致的 `vX.Y.Z`。默认创建**草稿 Release**；勾选 `publish` 才立即发布。流程拒绝已有 Tag 或 Release，不重定向旧 Tag、不覆盖已有附件。若需重新发布，应先核对原草稿/版本，不盲目重跑。
+
+公证最多等待 20 分钟。只有 Accepted、附票、签名校验、Gatekeeper 以及最终 ZIP 解压复验全部通过，才生成 `OCloudSync-notarized-…` 工件和 Release 附件。下载正式版本应使用 Release 中的 `OCloudSync-macOS-arm64.zip`，并用 `SHA256SUMS` 校验；普通 **Build macOS App** 工件和 `unsigned-release-input-…` 均非正式发行包。
+
+若公证中断，流程失败并尽量保留 `NOT-FOR-DISTRIBUTION-notary-recovery-…` 工件 7 天，其中只有提交记录与待公证 App，没有钥匙串或凭据。不要分发这个恢复工件，也不要立即重跑整个工作流重复提交。维护者可下载并解压其中的 `notary-recovery.zip`，保留原 `notarized/work/`，使用本机的 profile 对 `notarized/` 执行 `--resume`。若未保存提交 ID，先查 Apple history。正常签名产物保留 14 天，发行附件由 Release 长期保留。
