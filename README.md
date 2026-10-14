@@ -36,7 +36,7 @@ open dist/OCloudSync.app
 
 源码无第三方 Swift 包依赖，运行 App 不需要 Node、Python 或浏览器自动化工具。完整测试另需 Node.js 24 和 Python 3，参见 [贡献指南](CONTRIBUTING.md)。
 
-Actions 的成功构建也提供 ZIP 和 SHA-256 校验文件，保留 14 天，获取方式见 [构建说明](docs/CI.md)。**当前 App 采用 ad-hoc 签名，尚未 Developer ID 签名或 Apple 公证，也没有正式 Release。** 本地重新构建可能需要重新授权照片或钥匙串；不要为运行 App 关闭系统安全保护。
+正式安装包从 [GitHub Releases](https://github.com/vissong/OCloudSync/releases) 下载，采用 Developer ID 签名并通过 Apple 公证，同时提供 SHA-256 校验文件。普通 Actions 构建和默认本地构建采用 ad-hoc 签名；Actions 工件保留 14 天，获取方式见 [构建说明](docs/CI.md)。本地重新构建可能需要重新授权照片或钥匙串；不要为运行 App 关闭系统安全保护。
 
 ## 首次使用
 
