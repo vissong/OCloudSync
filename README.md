@@ -10,7 +10,7 @@
 
 ## 演示视频
 
-https://github.com/user-attachments/assets/f74dc43e-3371-4dc5-af7c-7d3ad07288d0
+https://github.com/user-attachments/assets/2d717720-a4d5-4850-9459-a7b906348be2
 
 ## 可以做什么
 
